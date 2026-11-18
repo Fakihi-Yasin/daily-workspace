@@ -279,3 +279,40 @@ test('7. focus sessions: seconds kept, day durations, Today + Stats share the re
   assert.equal(a.id, b.id); assert.ok(b.existing);
   await assert.rejects(call('PUT', `/api/categories/${a.id}`, { name: 'Other', color: 'sky', coding: true }), /already exists/);
 });
+
+test('8. editing an entry: type change keeps id + history, moves sections, duplicate link is refused', async () => {
+  const usaIptv = (await call('POST', '/api/assets', { kind: 'site_iptv', name: 'USA', url: 'https://usa-iptv.test', from_date: today })).id;
+  const wrong = (await call('POST', '/api/assets', { kind: 'pinterest', name: 'USA', url: 'https://www.USA-iptv.test/', from_date: today })).id;
+  const blog = (await call('POST', '/api/assets', { kind: 'pinterest', name: 'Cooking pins', url: 'https://cooking.test', from_date: today })).id;
+  let d = await call('GET', '/api/today');
+  const pinTask = d.tasks.find(t => t.asset_id === blog && t.unit === 'pin');
+  await call('POST', `/api/tasks/${pinTask.id}/mark`, { kind: 'pin', idx: 1, asset_id: blog, done: true }); // history on the entry we'll move
+
+  // Same link already under IPTV sites → 409 with details, and nothing changes.
+  const before = (await call('GET', '/api/assets')).find(a => a.id === wrong);
+  const r = await fetch(base + `/api/assets/${wrong}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'USA', kind: 'site_iptv', url: before.url }) });
+  const j = await r.json();
+  assert.equal(r.status, 409); assert.match(j.error, /already has “USA”/); assert.equal(j.conflict.id, usaIptv);
+  assert.deepEqual((await call('GET', '/api/assets')).find(a => a.id === wrong), before, 'entry unchanged after refused edit');
+
+  // A real type change: same id, history kept, section + counts + today's routines follow the new type.
+  const statsBefore = await call('GET', `/api/stats?from=${today}&to=${today}`);
+  const res = await call('PUT', `/api/assets/${blog}`, { name: 'Cooking site', kind: 'site_blog', url: 'https://cooking.test' });
+  assert.equal(res.moved, true); assert.equal(res.kind, 'site_blog');
+  const moved = (await call('GET', '/api/assets')).find(a => a.id === blog);
+  assert.equal(moved.kind, 'site_blog'); assert.equal(moved.name, 'Cooking site');
+  const statsAfter = await call('GET', `/api/stats?from=${today}&to=${today}`);
+  assert.equal(statsAfter.assetCounts.pinterest.active, statsBefore.assetCounts.pinterest.active - 1);
+  assert.equal(statsAfter.assetCounts.site_blog.active, (statsBefore.assetCounts.site_blog?.active || 0) + 1);
+  d = await call('GET', '/api/today');
+  assert.ok(d.tasks.some(t => t.asset_id === blog && t.unit === 'article'), 'today gets an article task for the corrected type');
+  const keptPin = d.tasks.find(t => t.id === pinTask.id);
+  assert.ok(keptPin && keptPin.progress.done === 1, 'the Pin already logged today is kept (history)');
+  assert.equal(statsAfter.activity.pinsByAccount.find(x => x.asset_id === blog).count, 1, 'Pin history still attributed to the same entry');
+  const tomorrowD = await call('GET', `/api/today?date=${tomorrow}`);
+  assert.ok(!tomorrowD.tasks.some(t => t.asset_id === blog && t.unit === 'pin') && tomorrowD.tasks.some(t => t.asset_id === blog && t.unit === 'article'), 'future days use the new type');
+
+  // Persists across a restart.
+  await stop(proc); proc = await startServer(DIR, 4511);
+  assert.equal((await call('GET', '/api/assets')).find(a => a.id === blog).kind, 'site_blog');
+});

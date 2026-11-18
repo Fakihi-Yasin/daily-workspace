@@ -106,7 +106,7 @@ const server = http.createServer(async (req, res) => {
     send(res, 200, out === undefined ? { ok: true } : out, { 'X-Mode': mode });
   } catch (e) {
     if (!e.status) console.error(e);
-    send(res, e.status || 500, { error: e.status ? e.message : 'Internal error: ' + e.message });
+    send(res, e.status || 500, { error: e.status ? e.message : 'Internal error: ' + e.message, ...(e.conflict ? { conflict: e.conflict } : {}) });
   }
 });
 

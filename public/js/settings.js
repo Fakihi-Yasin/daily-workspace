@@ -65,26 +65,56 @@ function Assets({ data }) {
           ${a.upcoming.map(u => html`<div class="small muted">→ ${STATUS_LABEL[u.status]} from ${fmtShort(u.from_date)}</div>`)}
         </div>
         <${Chip} color=${STATUS_COLOR[a.status]}>${STATUS_LABEL[a.status]}</${Chip}>
-        <button class="btn sm" onClick=${() => setEdit(a)}>Rename</button>
+        <button class="btn sm" onClick=${() => setEdit(a)} aria-label=${'Edit ' + a.name}>Edit</button>
         <button class="btn sm" onClick=${() => setStatusFor(a)}>${a.status === 'active' ? 'Pause / archive' : 'Reactivate…'}</button>
       </div>`)}</div>
     </section>`)}
-    ${edit && html`<${EditAsset} a=${edit} onClose=${() => setEdit(null)} />`}
+    ${edit && html`<${EditAsset} a=${edit} onClose=${() => setEdit(null)} onPause=${() => { const a = edit; setEdit(null); setStatusFor(a); }} />`}
     ${statusFor && html`<${AssetStatus} a=${statusFor} today=${data.today} onClose=${() => setStatusFor(null)} />`}
   </div>`;
 }
 
-function EditAsset({ a, onClose }) {
+function EditAsset({ a, onClose, onPause }) {
   const [name, setName] = useState(a.name);
+  const [kind, setKind] = useState(a.kind);
   const [url, setUrl] = useState(a.url || '');
   const [notes, setNotes] = useState(a.notes || '');
+  const [conflict, setConflict] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const moving = kind !== a.kind;
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true); setConflict(null);
+    try {
+      const r = await api('PUT', `/api/assets/${a.id}`, { name, kind, url, notes });
+      bus.emit();
+      toast({ msg: r.moved ? `Saved · moved to ${KIND_PLURAL[r.kind]}` : 'Saved' });
+      onClose();
+    } catch (err) {
+      if (err.conflict) setConflict({ message: err.message, ...err.conflict });
+      else toast({ msg: err.message, kind: 'error' });
+    } finally { setBusy(false); }
+  };
   return html`<${Modal} title=${'Edit · ' + a.name} onClose=${onClose}>
-    <form class="stack" onSubmit=${async (e) => { e.preventDefault(); await act('PUT', `/api/assets/${a.id}`, { name, url, notes }); toast({ msg: 'Saved' }); onClose(); }}>
+    <form class="stack" onSubmit=${save}>
       <label class="field">Name<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} /></label>
-      <label class="field">Link<input type="url" value=${url} onInput=${(e) => setUrl(e.target.value)} /></label>
+      <label class="field">Type<select value=${kind} onChange=${(e) => { setKind(e.target.value); setConflict(null); }}>
+        ${Object.keys(KIND_LABELS).map(k => html`<option value=${k}>${KIND_LABELS[k]}</option>`)}</select></label>
+      <label class="field">Link<input type="url" value=${url} onInput=${(e) => { setUrl(e.target.value); setConflict(null); }} placeholder="https://" /></label>
       <label class="field">Notes<textarea value=${notes} onInput=${(e) => setNotes(e.target.value)} /></label>
-      <p class="hint">The new name shows from today. History keeps its scores as they were.</p>
-      <div class="form-actions"><button type="button" class="btn" onClick=${onClose}>Cancel</button><button class="btn primary">Save</button></div>
+      ${moving
+        ? html`<p class="notice blue">Moves this entry from <strong>${KIND_PLURAL[a.kind]}</strong> to <strong>${KIND_PLURAL[kind]}</strong>. Its history stays with it; from today, routines treat it as “${KIND_LABELS[kind]}” (today’s untouched ${KIND_LABELS[a.kind]} tasks for it are replaced).</p>`
+        : html`<p class="hint">Changes show from today. History keeps its scores as they were.</p>`}
+      ${conflict && html`<div class="notice conflict" role="alert">
+        <strong>Possible duplicate — nothing was saved.</strong>
+        <p style="margin-top:4px">${KIND_PLURAL[conflict.kind]} already has <strong>${conflict.name}</strong>${conflict.url ? html` (<span class="num">${conflict.url}</span>)` : ''}, ${conflict.status === 'active' ? 'active' : conflict.status}. Moving this entry there would create a second copy.</p>
+        <p style="margin-top:4px">Keep the existing one and pause or archive this mistaken entry instead.</p>
+        <div class="row wrap" style="margin-top:8px">
+          <button type="button" class="btn sm" onClick=${onClose}>Cancel edit</button>
+          <button type="button" class="btn sm dark" onClick=${onPause}>Pause / archive “${a.name}” (${KIND_LABELS[a.kind]})</button>
+        </div>
+      </div>`}
+      <div class="form-actions"><button type="button" class="btn" onClick=${onClose}>Cancel</button><button class="btn primary" disabled=${busy}>Save</button></div>
     </form>
   </${Modal}>`;
 }

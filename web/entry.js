@@ -75,6 +75,7 @@ async function start() {
       await auth.logout();
     },
   };
+  root.innerHTML = ''; // remove the full-height "Loading…" placeholder, or it stays under the dashboard as empty scroll space
   mount(root);
 }
 

@@ -25,7 +25,7 @@ export async function api(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+  if (!res.ok) { const err = new Error(data.error || `Error ${res.status}`); err.status = res.status; err.conflict = data.conflict; throw err; }
   return data;
 }
 // Mutation helper: run, notify every view, surface errors.

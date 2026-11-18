@@ -527,3 +527,4 @@ table.data td.r, table.data th.r { text-align: right; }
 .signin-card { width: min(420px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 28px; }
 .signin-brand { color: var(--ink); padding: 0; }
 .signin-card .btn.lg { align-self: flex-start; }
+.notice.conflict { background: var(--pink-soft); border: 1px solid var(--pink); }

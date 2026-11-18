@@ -64,7 +64,7 @@ export function createLocalBackend({ userId, storage, SQL, safetyBackup }) {
     try {
       return clone(await A.handle(ctx, { method }, url, body ? JSON.parse(JSON.stringify(body)) : {}));
     } catch (e) {
-      throw new Error(e.message || 'Error');
+      const err = new Error(e.message || 'Error'); err.status = e.status; err.conflict = e.conflict; throw err;
     } finally {
       persist(slot); // GET requests may also write (daily checklist generation, timer expiry)
     }
