@@ -1,0 +1,10 @@
+# Never upload local data or local build/test output to Vercel.
+data/
+dist/
+dist-test/
+node_modules/
+*.sqlite
+*.sqlite-*
+*.tgz
+.env*
+!.env.example

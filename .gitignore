@@ -1,0 +1,9 @@
+data/
+node_modules/
+dist/
+dist-test/
+.vercel/
+.env*
+!.env.example
+*.sqlite
+*.sqlite-*
