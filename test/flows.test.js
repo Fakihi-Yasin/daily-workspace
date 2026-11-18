@@ -316,3 +316,38 @@ test('8. editing an entry: type change keeps id + history, moves sections, dupli
   await stop(proc); proc = await startServer(DIR, 4511);
   assert.equal((await call('GET', '/api/assets')).find(a => a.id === blog).kind, 'site_blog');
 });
+
+test('9. deleting one of two entries with the same name + link removes only that id; history and scores stay', async () => {
+  const iptv = (await call('POST', '/api/assets', { kind: 'site_iptv', name: 'USA', url: 'https://usa-twin.test', from_date: today })).id;
+  const pin = (await call('POST', '/api/assets', { kind: 'pinterest', name: 'USA', url: 'https://usa-twin.test', from_date: today })).id;
+  let d = await call('GET', '/api/today');
+  const pinTask = d.tasks.find(t => t.asset_id === pin && t.unit === 'pin');
+  await call('POST', `/api/tasks/${pinTask.id}/mark`, { kind: 'pin', idx: 1, asset_id: pin, done: true });
+  const before = await call('GET', `/api/stats?from=${today}&to=${today}`);
+  const scoreBefore = (await call('GET', '/api/today')).score;
+
+  await call('DELETE', `/api/assets/${pin}`);
+  const list = await call('GET', '/api/assets');
+  assert.ok(!list.some(a => a.id === pin), 'deleted entry gone from the list');
+  assert.ok(list.some(a => a.id === iptv && a.name === 'USA' && a.kind === 'site_iptv'), 'twin with the same name + link intact');
+  const after = await call('GET', `/api/stats?from=${today}&to=${today}`);
+  assert.equal(after.assetCounts.pinterest.active, before.assetCounts.pinterest.active - 1, 'counts refreshed');
+  assert.equal(after.assetCounts.site_iptv.active, before.assetCounts.site_iptv.active, 'IPTV count unchanged');
+  assert.equal(after.activity.pins, before.activity.pins, 'logged Pin still counted');
+  assert.equal(after.activity.pinsByAccount.find(x => x.asset_id === pin).name, 'USA', 'history still resolves the name');
+  d = await call('GET', '/api/today');
+  assert.ok(d.tasks.some(t => t.id === pinTask.id && t.progress.done === 1), 'today’s worked task kept');
+  assert.deepEqual(d.score, scoreBefore, 'today’s score unchanged');
+  const tm = await call('GET', `/api/today?date=${tomorrow}`);
+  assert.ok(!tm.tasks.some(t => t.asset_id === pin), 'no future tasks for the deleted entry');
+  assert.ok(tm.tasks.some(t => t.asset_id === iptv), 'twin still scheduled');
+  await assert.rejects(call('PUT', `/api/assets/${pin}`, { name: 'x' }), /Not found/);
+  await assert.rejects(call('DELETE', `/api/assets/${pin}`), /no longer exists/);
+  // The duplicate-link check ignores deleted entries.
+  const third = (await call('POST', '/api/assets', { kind: 'site_other', name: 'USA copy', url: 'https://usa-twin.test', from_date: today })).id;
+  await call('PUT', `/api/assets/${third}`, { kind: 'pinterest' });
+  // Persists across a restart.
+  await stop(proc); proc = await startServer(DIR, 4511);
+  const l2 = await call('GET', '/api/assets');
+  assert.ok(!l2.some(a => a.id === pin) && l2.some(a => a.id === iptv));
+});

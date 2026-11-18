@@ -1,5 +1,5 @@
 // Settings: accounts & sites, routines (versioned with effective dates), categories, timezone, backup, demo.
-import { html, useState, useResource, api, act, bus, toast, Icon, useTheme, THEMES, downloadJson, isBrowserStorage, BROWSER_NOTE, Chip, Modal, EffectPicker, Empty, fmtDay, fmtShort, addDays,
+import { html, useState, useEffect, useRef, useResource, api, act, bus, toast, Icon, useTheme, THEMES, downloadJson, isBrowserStorage, BROWSER_NOTE, Chip, Modal, EffectPicker, Empty, fmtDay, fmtShort, addDays,
   KIND_LABELS, KIND_PLURAL, KIND_COLOR, DAYS, DAY_NAMES } from './lib.js';
 
 const TABS = [['assets', 'Accounts & sites'], ['routines', 'Routines'], ['categories', 'Categories'], ['general', 'General'], ['backup', 'Backup'], ['demo', 'Demo']];
@@ -36,6 +36,7 @@ function Assets({ data }) {
   const [from, setFrom] = useState(addDays(data.today, 1));
   const [edit, setEdit] = useState(null);
   const [statusFor, setStatusFor] = useState(null);
+  const [del, setDel] = useState(null);
   const add = async (e) => {
     e.preventDefault();
     const r = await act('POST', '/api/assets', { kind, name, url, from_date: from });
@@ -59,19 +60,85 @@ function Assets({ data }) {
     ${grouped.length === 0 && html`<${Empty} title="No sites or accounts yet">Start with your 4 sites, your Pinterest accounts and your Facebook / Instagram pages.</${Empty}>`}
     ${grouped.map(([k, list]) => html`<section>
       <div class="section-head"><h3>${KIND_PLURAL[k]}</h3><span class="muted small">${list.filter(a => a.status === 'active').length} active · ${list.length} total</span></div>
-      <div class="list">${list.map(a => html`<div class="list-row">
+      <div class="list">${list.map(a => html`<div class="list-row" key=${a.id}>
         <div class="grow">
           <strong>${a.name}</strong> ${a.url && html`<a class="small" href=${a.url} target="_blank" rel="noopener noreferrer">${a.url.replace(/^https?:\/\//, '')}</a>`}
           ${a.upcoming.map(u => html`<div class="small muted">→ ${STATUS_LABEL[u.status]} from ${fmtShort(u.from_date)}</div>`)}
         </div>
-        <${Chip} color=${STATUS_COLOR[a.status]}>${STATUS_LABEL[a.status]}</${Chip}>
-        <button class="btn sm" onClick=${() => setEdit(a)} aria-label=${'Edit ' + a.name}>Edit</button>
-        <button class="btn sm" onClick=${() => setStatusFor(a)}>${a.status === 'active' ? 'Pause / archive' : 'Reactivate…'}</button>
+        <div class="row-end">
+          <${Chip} color=${STATUS_COLOR[a.status]}>${STATUS_LABEL[a.status]}</${Chip}>
+          <${ActionsMenu} label=${`${a.name} — ${KIND_LABELS[a.kind]}`} items=${[
+            ['Edit', () => setEdit(a)],
+            [a.status === 'active' ? 'Pause / archive' : 'Reactivate…', () => setStatusFor(a)],
+            ['Delete', () => setDel(a), 'danger'],
+          ]} />
+        </div>
       </div>`)}</div>
     </section>`)}
     ${edit && html`<${EditAsset} a=${edit} onClose=${() => setEdit(null)} onPause=${() => { const a = edit; setEdit(null); setStatusFor(a); }} />`}
     ${statusFor && html`<${AssetStatus} a=${statusFor} today=${data.today} onClose=${() => setStatusFor(null)} />`}
+    ${del && html`<${DeleteAsset} a=${del} onClose=${() => setDel(null)} />`}
   </div>`;
+}
+
+// One "Actions" dropdown per row (keyboard: Enter/Space opens, ↑/↓ move, Esc closes).
+function ActionsMenu({ label, items }) {
+  const [open, setOpen] = useState(false);
+  const [up, setUp] = useState(false);
+  const ref = useRef();
+  const toggle = () => {
+    if (!open) { const r = ref.current.getBoundingClientRect(); setUp(window.innerHeight - r.bottom < 40 * items.length + 30 && r.top > 40 * items.length + 30); }
+    setOpen(!open);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const el = ref.current;
+    el.querySelector('[role=menuitem]')?.focus();
+    const away = (e) => { if (!el.contains(e.target)) setOpen(false); };
+    const keys = (e) => {
+      const btns = [...el.querySelectorAll('[role=menuitem]')];
+      const i = btns.indexOf(document.activeElement);
+      if (e.key === 'Escape') { setOpen(false); el.querySelector('.actions-btn').focus(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); }
+    };
+    document.addEventListener('mousedown', away); el.addEventListener('keydown', keys);
+    return () => { document.removeEventListener('mousedown', away); el.removeEventListener('keydown', keys); };
+  }, [open]);
+  return html`<div class="menu" ref=${ref}>
+    <button class="btn sm actions-btn" aria-haspopup="menu" aria-expanded=${open} aria-label=${'Actions for ' + label} onClick=${toggle}>
+      Actions <${Icon} name="chevD" size=${14} /></button>
+    ${open && html`<div class=${'menu-pop actions-pop' + (up ? ' up' : '')} role="menu" aria-label=${'Actions for ' + label}>
+      ${items.map(([text, fn, tone]) => html`<button role="menuitem" class=${'item' + (tone === 'danger' ? ' danger' : '')} onClick=${() => { setOpen(false); fn(); }}>${text}</button>`)}
+    </div>`}
+  </div>`;
+}
+
+function DeleteAsset({ a, onClose }) {
+  const [busy, setBusy] = useState(false);
+  const confirm = async () => {
+    setBusy(true);
+    try {
+      await api('DELETE', `/api/assets/${a.id}`);
+      bus.emit();
+      onClose();
+      toast({ msg: `Deleted “${a.name}” (${KIND_LABELS[a.kind]})`, undo: async () => { await api('POST', `/api/assets/${a.id}/restore`); bus.emit(); } });
+    } catch (e) { toast({ msg: e.message, kind: 'error' }); setBusy(false); }
+  };
+  return html`<${Modal} title="Delete this entry?" onClose=${onClose}>
+    <div class="stack">
+      <dl class="kv">
+        <dt>Name</dt><dd><strong>${a.name}</strong></dd>
+        <dt>Type</dt><dd>${KIND_LABELS[a.kind]}</dd>
+        <dt>Link</dt><dd>${a.url ? html`<span class="num">${a.url}</span>` : html`<span class="muted">none</span>`}</dd>
+        <dt>Status</dt><dd>${STATUS_LABEL[a.status]}</dd>
+      </dl>
+      <p>Only this entry is deleted. It leaves your lists, the counts and every routine from today.</p>
+      <p class="hint">Past activity and scores stay in your history. Entries with the same name or link are not affected.</p>
+      <div class="form-actions"><button class="btn" onClick=${onClose}>Cancel</button>
+        <button class="btn danger-solid" disabled=${busy} onClick=${confirm}>Delete “${a.name}” (${KIND_LABELS[a.kind]})</button></div>
+    </div>
+  </${Modal}>`;
 }
 
 function EditAsset({ a, onClose, onPause }) {

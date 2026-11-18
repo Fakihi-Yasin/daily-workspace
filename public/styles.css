@@ -528,3 +528,15 @@ table.data td.r, table.data th.r { text-align: right; }
 .signin-brand { color: var(--ink); padding: 0; }
 .signin-card .btn.lg { align-self: flex-start; }
 .notice.conflict { background: var(--pink-soft); border: 1px solid var(--pink); }
+
+/* row actions dropdown */
+.row-end { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.actions-btn { gap: 5px; }
+.actions-pop { min-width: 190px; }
+.menu-pop button.item.danger { color: var(--danger); }
+.btn.danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.danger-solid:hover { filter: brightness(.95); }
+dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+dl.kv dt { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); align-self: center; }
+dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+.menu-pop.up { top: auto; bottom: 38px; }
