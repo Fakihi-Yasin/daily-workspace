@@ -71,11 +71,11 @@ export function Stats() {
       <div class="grid2">
         <div class="card">
           ${data.target.categories.map(c => html`<div class="hbar"><span class="name">${c.category}</span><${Bar} value=${c.pct} /><span class="v">${c.done}/${c.target}</span></div>`)}
-          <p class="small" style="margin-top:10px">Average daily score: <strong>${pct(data.avgDaily)}</strong> (average of the categories scheduled each day).</p>
+          <p class="small" style="margin-top:10px">Average daily score: <strong>${pct(data.avgDaily)}</strong> (tasks done ÷ tasks due, averaged over days with tasks).</p>
         </div>
         <div class="card"><h4>Daily score</h4>
-          <div class="daybars" role="img" aria-label="Daily score over the period">${data.daily.map(d => html`<div class=${'b' + (d.overall == null ? ' none' : '')} style=${{ height: (d.overall || 0) + '%' }} title=${`${fmtShort(d.date)} : ${d.overall == null ? 'nothing scheduled' : pct(d.overall)}`}></div>`)}</div>
-          <p class="small muted" style="margin-top:6px">Hatched: day with no scheduled routine (excluded from averages).</p>
+          <div class="daybars" role="img" aria-label="Daily score over the period">${data.daily.map(d => html`<div class=${'b' + (d.overall == null ? ' none' : '')} style=${{ height: (d.overall || 0) + '%' }} title=${`${fmtShort(d.date)} : ${d.overall == null ? 'nothing scheduled' : `${d.done}/${d.total} tasks · ${pct(d.overall)}`}`}></div>`)}</div>
+          <p class="small muted" style="margin-top:6px">Hatched: day with no tasks (excluded from averages).</p>
         </div>
       </div>`}
     </section>

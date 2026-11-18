@@ -351,3 +351,64 @@ test('9. deleting one of two entries with the same name + link removes only that
   const l2 = await call('GET', '/api/assets');
   assert.ok(!l2.some(a => a.id === pin) && l2.some(a => a.id === iptv));
 });
+
+test('10. My tasks + daily score count: the 4 / 11 · 36% example; timers never change the score', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tableau-todos-'));
+  const srv = await startServer(dir, 4513);
+  const b3 = 'http://127.0.0.1:4513';
+  const c = (m, u, body) => call(m, u, body, b3);
+  try {
+    const t = (await c('GET', '/api/bootstrap')).today;
+    await c('POST', '/api/assets', { kind: 'facebook', name: 'FB page', from_date: t }); // 2 slots
+    let n = (await c('GET', '/api/today')).count.recurring.total;
+    let i = 0;
+    while (n < 9) { await c('POST', '/api/assets', { kind: 'pinterest', name: 'Pins ' + (++i), from_date: t }); n = (await c('GET', '/api/today')).count.recurring.total; }
+    assert.equal(n, 9, '9 recurring task items');
+    const fix = await c('POST', '/api/todos', { title: 'Fix DMCA' });
+    await c('POST', '/api/todos', { title: 'Review YouTube clips' });
+    let d = await c('GET', '/api/today');
+    assert.deepEqual([d.count.done, d.count.total], [0, 11], 'total = 9 recurring + 2 custom');
+
+    // Complete 3 recurring items: WhatsApp, one exact quota, one quota + an extra (extras don't add). One partial doesn't count.
+    const pins = d.tasks.filter(x => x.unit === 'pin');
+    const wa = d.tasks.find(x => x.type === 'check');
+    await c('POST', `/api/tasks/${wa.id}/mark`, { kind: 'check', idx: 0, done: true });
+    for (const [k, howMany] of [[0, 5], [1, 5], [2, 3]]) for (let idx = 1; idx <= howMany; idx++) await c('POST', `/api/tasks/${pins[k].id}/mark`, { kind: 'pin', idx, asset_id: pins[k].asset_id, done: true });
+    await c('POST', `/api/tasks/${pins[1].id}/extra`, { kind: 'pin', asset_id: pins[1].asset_id });
+    await c('PUT', `/api/todos/${fix.id}`, { done: true });
+    d = await c('GET', '/api/today');
+    assert.deepEqual([d.count.done, d.count.total, d.count.pct, d.count.left], [4, 11, 36, 7], '4 / 11 tasks done · 36% · 7 left');
+
+    // Timers alone never change the score; ending a session started for a task doesn't mark it done.
+    const s = await c('POST', '/api/session/start', { task_label: 'Review YouTube clips', duration_sec: 1500 });
+    assert.deepEqual((await c('GET', '/api/today')).count, d.count, 'starting a timer: unchanged');
+    await sleep(1100);
+    await c('POST', `/api/session/${s.id}/finish`);
+    const d2 = await c('GET', '/api/today');
+    assert.deepEqual(d2.count, d.count, 'ending a timer: unchanged');
+    assert.equal(d2.todos.find(x => x.title === 'Review YouTube clips').done, 0, 'task not marked done by the timer');
+    assert.equal(d2.sessions[0].task_label, 'Review YouTube clips', 'time logged');
+
+    // Reopen / delete update the count.
+    await c('PUT', `/api/todos/${fix.id}`, { done: false });
+    assert.deepEqual(((x) => [x.done, x.total, x.pct])((await c('GET', '/api/today')).count), [3, 11, 27]);
+    await c('DELETE', `/api/todos/${fix.id}`);
+    assert.deepEqual(((x) => [x.done, x.total, x.pct])((await c('GET', '/api/today')).count), [3, 10, 30]);
+
+    // Stats uses the same count; tasks persist, stay on their date and never repeat.
+    const st = await c('GET', `/api/stats?from=${t}&to=${t}`);
+    assert.deepEqual([st.daily[0].done, st.daily[0].total, st.daily[0].overall], [3, 10, 30]);
+    const nextDay = (() => { const x = new Date(t + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); })();
+    await c('POST', '/api/todos', { title: 'Tomorrow only', date: nextDay });
+    assert.equal((await c('GET', `/api/today?date=${nextDay}`)).todos.length, 1);
+    await stop(srv);
+    const srv2 = await startServer(dir, 4513);
+    try {
+      const after = await c('GET', '/api/today');
+      assert.deepEqual(after.todos.map(x => x.title), ['Review YouTube clips'], 'only this date’s tasks, after a restart');
+      assert.deepEqual((await c('GET', `/api/today?date=${nextDay}`)).todos.map(x => x.title), ['Tomorrow only']);
+      const empty = await c('GET', `/api/today?date=${(() => { const x = new Date(t + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + 2); return x.toISOString().slice(0, 10); })()}`);
+      assert.equal(empty.todos.length, 0, 'one-off tasks never repeat');
+    } finally { await stop(srv2); }
+  } catch (e) { await stop(srv).catch(() => {}); throw e; }
+});

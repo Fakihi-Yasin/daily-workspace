@@ -1,6 +1,6 @@
 // "Today": the routine checklist first, with a compact focus panel and a right column (score, next action, sessions).
 import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, fmtDay, fmtShort, addDays, fmtDur, pct } from './lib.js';
-import { FocusPanel } from './focus.js';
+import { FocusPanel, requestStart } from './focus.js';
 
 const CAT_COLORS = ['blue', 'pink', 'mint', 'yellow', 'sky'];
 const catColor = (name, all) => CAT_COLORS[Math.max(0, all.indexOf(name)) % CAT_COLORS.length];
@@ -11,9 +11,12 @@ export function Today() {
   const [date, setDate] = useState(null);
   const { data, error } = useResource('/api/today' + (date ? `?date=${date}` : ''));
   const [over, setOver] = useState({}); // optimistic marks: key -> bool
+  const [todoOver, setTodoOver] = useState({}); // optimistic one-off task changes: id -> { done } | { gone: true }
+  const [pending, setPending] = useState([]); // one-off tasks being saved
+  const [adding, setAdding] = useState(false);
   const [settled, setSettled] = useState(null); // { date, ids:Set } — which tasks are laid out as completed
   const [doneOpen, setDoneOpen] = useState(() => { try { return localStorage.getItem('completedOpen') !== '0'; } catch { return true; } });
-  useEffect(() => { setOver({}); }, [data]);
+  useEffect(() => { setOver({}); setTodoOver({}); setPending([]); }, [data]);
   // Rows move between "to do" and "completed" only after the undo window, never under the cursor.
   useEffect(() => {
     if (!data) return;
@@ -31,7 +34,9 @@ export function Today() {
   const isToday = data.date === data.today;
   const assets = new Map(data.assets.map(a => [a.id, a]));
   const cats = [...new Set(data.tasks.map(t => t.category))];
-  const ctx = { data, assets, over, setOver, isToday };
+  const todos = [...data.todos.filter(t => !(todoOver[t.id] && todoOver[t.id].gone)).map(t => (todoOver[t.id] ? { ...t, ...todoOver[t.id] } : t)), ...pending];
+  const ctx = { data, assets, over, setOver, isToday, todos, setTodoOver, setPending };
+  const count = liveCount(ctx);
   const doneIds = settled.date === data.date ? settled.ids : new Set();
   const openTasks = data.tasks.filter(t => !doneIds.has(t.id));
   const doneTasks = data.tasks.filter(t => doneIds.has(t.id));
@@ -46,6 +51,8 @@ export function Today() {
         <strong class="cap">${fmtDay(data.date)}</strong>
         <button class="icon-btn" aria-label="Next day" onClick=${() => setDate(addDays(data.date, 1))}><${Icon} name="chevR" /></button>
         ${!isToday && html`<button class="btn sm" onClick=${() => setDate(null)}>Back to today</button>`}
+        <button class="btn sm add-task-btn" aria-expanded=${adding} onClick=${() => { setAdding(true); setTimeout(() => document.getElementById('add-task-input')?.focus(), 30); }}>
+          <${Icon} name="plus" size=${15} />Add task</button>
       </div>
     </header>
     ${!isToday && html`<p class="notice" style="margin-bottom:14px">${data.date < data.today
@@ -56,13 +63,15 @@ export function Today() {
       <div class="tg-focus"><${FocusPanel} today=${data.today} tz=${data.tz} /></div>
 
       <aside class="tg-side" aria-label="Day summary">
-        <${ScoreCard} score=${data.score} />
+        <${ScoreCard} count=${count} />
         <${NextAction} ctx=${ctx} />
         <${SessionsCard} sessions=${data.sessions} isToday=${isToday} />
       </aside>
 
       <div class="tg-tasks">
-        ${data.tasks.length === 0
+        ${(todos.length > 0 || adding) && html`<${MyTasks} ctx=${ctx} adding=${adding} setAdding=${setAdding} />`}
+        ${data.tasks.length === 0 && (todos.length > 0 || adding) ? html`<p class="small muted">No recurring routines scheduled ${isToday ? 'today' : 'this day'} · <a href="#/settings?tab=routines">Set up routines</a></p>`
+        : data.tasks.length === 0
           ? html`<div class="card empty-routines">
               <h3>No routines scheduled ${isToday ? 'today' : 'this day'}</h3>
               <p class="muted">Add your sites and accounts, then choose which days each routine runs.</p>
@@ -84,23 +93,128 @@ export function Today() {
   </div>`;
 }
 
-function ScoreCard({ score }) {
+// Live task count: the same numbers drive the Daily score card and "tasks left".
+function liveCount(ctx) {
+  const due = ctx.data.tasks.filter(t => t.progress.scoreTarget > 0);
+  const isDone = (t) => liveDone(ctx, t).scoreDone >= t.progress.scoreTarget;
+  const rDone = due.filter(isDone).length;
+  const cDone = ctx.todos.filter(t => t.done).length;
+  const done = rDone + cDone, total = due.length + ctx.todos.length;
+  const cats = new Map();
+  for (const t of due) { const c = cats.get(t.category) || { category: t.category, done: 0, total: 0 }; c.total++; if (isDone(t)) c.done++; cats.set(t.category, c); }
+  return { done, total, left: total - done, pct: total ? Math.round((done / total) * 100) : null,
+    recurring: { done: rDone, total: due.length }, custom: { done: cDone, total: ctx.todos.length }, categories: [...cats.values()] };
+}
+
+function ScoreCard({ count }) {
   const [open, setOpen] = useState(false);
   return html`<section class="card side-card" aria-label="Daily score">
     <div class="row">
-      <${Ring} value=${score.overall} size=${48} stroke=${6}><span style="font-size:13px">${score.overall == null ? '—' : Math.round(score.overall)}</span></${Ring}>
-      <div style="flex:1">
+      <${Ring} value=${count.pct} size=${48} stroke=${6}><span style="font-size:13px">${count.pct == null ? '—' : count.pct}</span></${Ring}>
+      <div style="flex:1;min-width:0">
         <div class="label">Daily score</div>
-        <div class="score-num">${score.overall == null ? '—' : pct(score.overall)}</div>
+        ${count.total
+          ? html`<div class="score-line" aria-live="polite"><span class="score-num">${count.done} / ${count.total}</span> <span>tasks done · <strong>${count.pct}%</strong></span></div>`
+          : html`<div class="score-line">No tasks scheduled.</div>`}
       </div>
-      ${score.categories.length > 0 && html`<button class="link-btn small" aria-expanded=${open} onClick=${() => setOpen(!open)}>${open ? 'Hide' : 'How?'}</button>`}
+      ${count.total > 0 && html`<button class="link-btn small" aria-expanded=${open} onClick=${() => setOpen(!open)}>${open ? 'Hide' : 'How?'}</button>`}
     </div>
-    ${score.categories.length === 0 && html`<p class="small muted" style="margin-top:6px">No routines scheduled, so no score.</p>`}
     ${open && html`<div class="calc">
-      ${score.categories.map(c => html`<div class="calc-row"><span>${c.category}</span><span class="num">${c.done}/${c.target}${c.actual > c.done ? html` <span class="muted">(${c.actual})</span>` : ''}</span><strong class="num">${pct(c.pct)}</strong></div>`)}
-      <p class="small muted" style="margin-top:6px">Average of ${score.categories.length} scheduled ${score.categories.length === 1 ? 'category' : 'categories'}: (${score.categories.map(c => Math.round(c.pct)).join(' + ')}) ÷ ${score.categories.length} = <strong>${pct(score.overall)}</strong>. Each task counts at most 100%.</p>
+      ${count.categories.map(c => html`<div class="calc-row"><span>${c.category}</span><span class="num">${c.done}/${c.total}</span><strong class="num">${c.done === c.total ? '✓' : ''}</strong></div>`)}
+      ${count.custom.total > 0 && html`<div class="calc-row"><span>My tasks</span><span class="num">${count.custom.done}/${count.custom.total}</span><strong class="num">${count.custom.done === count.custom.total ? '✓' : ''}</strong></div>`}
+      <p class="small muted" style="margin-top:6px">${count.done} done ÷ ${count.total} tasks = <strong>${count.pct}%</strong>. A routine item with a quota counts once, when its target is reached; extras don’t add. Focus sessions don’t count.</p>
     </div>`}
   </section>`;
+}
+
+// ---------- My tasks (one-off, for this date only) ----------
+async function setTodoDone(ctx, t, done) {
+  ctx.setTodoOver(o => ({ ...o, [t.id]: { done: done ? 1 : 0 } }));
+  try {
+    await api('PUT', `/api/todos/${t.id}`, { done });
+    bus.emit();
+    toast({ msg: `${t.title} · ${done ? 'done' : 'reopened'}`, undo: async () => { await api('PUT', `/api/todos/${t.id}`, { done: !done }); bus.emit(); } });
+  } catch (e) { ctx.setTodoOver(o => { const n = { ...o }; delete n[t.id]; return n; }); toast({ msg: e.message, kind: 'error' }); }
+}
+async function deleteTodo(ctx, t) {
+  ctx.setTodoOver(o => ({ ...o, [t.id]: { gone: true } }));
+  try {
+    await api('DELETE', `/api/todos/${t.id}`);
+    bus.emit();
+    toast({ msg: `Deleted “${t.title}”`, undo: async () => { await api('POST', '/api/todos', { date: t.date, title: t.title, done: !!t.done, sort: t.sort }); bus.emit(); } });
+  } catch (e) { ctx.setTodoOver(o => { const n = { ...o }; delete n[t.id]; return n; }); toast({ msg: e.message, kind: 'error' }); }
+}
+
+function MyTasks({ ctx, adding, setAdding }) {
+  const [title, setTitle] = useState('');
+  const todos = ctx.todos;
+  const done = todos.filter(t => t.done).length;
+  const add = async (e) => {
+    e.preventDefault();
+    const v = title.trim();
+    if (!v) return;
+    const temp = { id: 'tmp-' + Date.now(), date: ctx.data.date, title: v, done: 0, temp: true };
+    ctx.setPending(p => [...p, temp]);
+    setTitle('');
+    try { await api('POST', '/api/todos', { date: ctx.data.date, title: v }); bus.emit(); }
+    catch (err) { ctx.setPending(p => p.filter(x => x.id !== temp.id)); toast({ msg: err.message, kind: 'error' }); }
+  };
+  return html`<section class="section routine my-tasks" id="my-tasks" aria-label="My tasks">
+    <div class="routine-head">
+      <h3>My tasks</h3>
+      ${todos.length > 0 && html`<span class="num rh-num">${done}/${todos.length} done</span>`}
+    </div>
+    ${adding && html`<form class="card add-task" onSubmit=${add} onKeyDown=${(e) => { if (e.key === 'Escape') { e.preventDefault(); setAdding(false); } }}>
+      <input id="add-task-input" type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} maxlength="200"
+        placeholder=${'Task for ' + (ctx.isToday ? 'today' : fmtShort(ctx.data.date)) + ', e.g. Fix DMCA'} aria-label="New task title" autofocus />
+      <button class="btn primary" disabled=${!title.trim()}>Add</button>
+      <button type="button" class="btn ghost" onClick=${() => setAdding(false)}>Close</button>
+    </form>`}
+    ${todos.length > 0 && html`<div class="task-list">${todos.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>`}
+  </section>`;
+}
+
+function TodoRow({ t, ctx }) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(t.title);
+  const [menu, setMenu] = useState(false);
+  const ref = useRef();
+  useEffect(() => {
+    if (!menu) return;
+    const f = (e) => { if (ref.current && !ref.current.contains(e.target)) setMenu(false); };
+    const k = (e) => { if (e.key === 'Escape') setMenu(false); };
+    document.addEventListener('mousedown', f); document.addEventListener('keydown', k);
+    return () => { document.removeEventListener('mousedown', f); document.removeEventListener('keydown', k); };
+  }, [menu]);
+  const saveTitle = async (e) => {
+    e.preventDefault();
+    if (!title.trim() || title.trim() === t.title) return setEditing(false);
+    try { await api('PUT', `/api/todos/${t.id}`, { title }); bus.emit(); setEditing(false); } catch (err) { toast({ msg: err.message, kind: 'error' }); }
+  };
+  const doneAt = t.done && t.done_at ? new Date(t.done_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+  return html`<div class=${'task todo-row' + (t.done ? ' done' : '')} id=${'todo-' + t.id}>
+    <div class="tname">
+      ${editing
+        ? html`<form class="row" onSubmit=${saveTitle}><input type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} aria-label="Task title" autofocus
+            onKeyDown=${(e) => { if (e.key === 'Escape') { setTitle(t.title); setEditing(false); } }} /><button class="btn sm primary">Save</button></form>`
+        : html`<span class="todo-title">${t.title}</span>
+          <small>${t.temp ? 'Saving…' : t.done ? `Done${doneAt ? ' at ' + doneAt : ''}` : 'One-off task'}</small>`}
+    </div>
+    <div class="todo-actions">
+      <button class="btn sm" disabled=${t.temp || !!t.done} onClick=${() => requestStart({ task_label: t.title })} aria-label=${'Start a session: ' + t.title}>
+        <${Icon} name="play" size=${13} />Start</button>
+      ${t.done
+        ? html`<button class="btn sm" disabled=${t.temp} onClick=${() => setTodoDone(ctx, t, false)} aria-label=${'Reopen: ' + t.title}><${Icon} name="undo" size=${14} />Reopen</button>`
+        : html`<button class="btn sm primary" disabled=${t.temp} onClick=${() => setTodoDone(ctx, t, true)} aria-label=${'Mark done: ' + t.title}><${Icon} name="check" size=${14} />Done</button>`}
+      <div class="menu" ref=${ref}>
+        <button class="icon-btn" disabled=${t.temp} aria-label=${'Options — ' + t.title} aria-expanded=${menu} onClick=${() => setMenu(!menu)}><${Icon} name="more" /></button>
+        ${menu && html`<div class="menu-pop">
+          <button class="item" onClick=${() => { setMenu(false); setTitle(t.title); setEditing(true); }}><${Icon} name="note" size=${16} />Edit title</button>
+          <button class="item danger" onClick=${() => { setMenu(false); deleteTodo(ctx, t); }}><${Icon} name="x" size=${16} />Delete</button>
+        </div>`}
+      </div>
+    </div>
+  </div>`;
 }
 
 function SessionsCard({ sessions, isToday }) {
@@ -211,10 +325,11 @@ function NextAction({ ctx }) {
   const [skip, setSkip] = useState(0);
   const { data } = ctx;
   const order = [...data.tasks].sort((x, y) => (x.time_slot || '99') < (y.time_slot || '99') ? -1 : (x.time_slot || '99') > (y.time_slot || '99') ? 1 : x.sort - y.sort);
-  const steps = order.map(t => ({ t, s: nextStep(ctx, t) })).filter(x => x.s);
+  const steps = [...order.map(t => ({ t, s: nextStep(ctx, t) })).filter(x => x.s),
+    ...ctx.todos.filter(t => !t.done && !t.temp).map(t => ({ todo: t, t: { category: 'My tasks', time_slot: '' }, s: { what: t.title, detail: 'One-off task', btn: 'Done' } }))];
   const cur = steps.length ? steps[skip % steps.length] : null;
-  const left = data.tasks.filter(t => t.status === 'open' && !t.progress.complete && t.progress.scoreTarget > 0).length;
-  if (!data.tasks.length) return null;
+  const { left, total } = liveCount(ctx);
+  if (!total) return null;
   return html`<section class="card side-card next" aria-label="Next action">
     <div class="row"><span class="label" style="flex:1">Next action</span>
       ${steps.length > 1 && html`<button class="btn sm ghost" onClick=${() => setSkip(skip + 1)}>Skip →</button>`}</div>
@@ -222,11 +337,13 @@ function NextAction({ ctx }) {
       <div class="row wrap" style="gap:6px"><${Chip} color="blue">${cur.t.category}</${Chip}>${cur.t.time_slot && html`<${Chip}>${cur.t.time_slot}</${Chip}>`}</div>
       <div class="what">${cur.s.what}</div>
       <p class="small muted">${cur.s.detail}</p>
-      ${cur.s.run
+      ${cur.todo
+        ? html`<button class="btn primary" onClick=${() => setTodoDone(ctx, cur.todo, true)}><${Icon} name="check" size=${16} />Done</button>`
+        : cur.s.run
         ? html`<button class="btn primary" onClick=${() => mark(ctx, cur.t, { ...cur.s.run, done: true, label: `${cur.s.what} · ${cur.s.detail}` })}><${Icon} name="check" size=${16} />${cur.s.btn}</button>`
         : html`<button class="btn primary" onClick=${() => document.getElementById('task-' + cur.t.id)?.scrollIntoView({ block: 'center' })}>Choose the site</button>`}
       <p class="small muted">${left} task${left === 1 ? '' : 's'} left</p>`
-    : html`<div class="what">Daily routines complete</div><p class="small muted">Every routine scheduled ${ctx.isToday ? 'today' : 'this day'} is done.</p>`}
+    : html`<div class="what">All tasks done</div><p class="small muted">Every task ${ctx.isToday ? 'for today' : 'for this day'} is done.</p>`}
   </section>`;
 }
 

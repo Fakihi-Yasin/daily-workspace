@@ -131,3 +131,15 @@ test('timer state survives a reload in the browser build', async () => {
   const again = await backendFor(ls, A_ID).request('GET', '/api/session');
   assert.equal(again.session.id, s.id); assert.equal(again.session.planned_sec, 86400); assert.equal(again.session.state, 'running');
 });
+
+test('one-off tasks are saved per account and per date in the browser build', async () => {
+  const ls = new MemStorage();
+  const a = backendFor(ls, A_ID);
+  const today = (await a.request('GET', '/api/bootstrap')).today;
+  const t = await a.request('POST', '/api/todos', { title: 'Fix DMCA', date: today });
+  await a.request('PUT', `/api/todos/${t.id}`, { done: true });
+  const again = await backendFor(ls, A_ID).request('GET', '/api/today');
+  assert.deepEqual(again.todos.map(x => [x.title, x.done]), [['Fix DMCA', 1]]);
+  assert.equal(again.count.custom.done, 1);
+  assert.equal((await backendFor(ls, B_ID).request('GET', '/api/today')).todos.length, 0, 'B never sees A’s tasks');
+});

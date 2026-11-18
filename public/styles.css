@@ -540,3 +540,16 @@ dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0
 dl.kv dt { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); align-self: center; }
 dl.kv dd { margin: 0; overflow-wrap: anywhere; }
 .menu-pop.up { top: auto; bottom: 38px; }
+
+/* ---------- My tasks (one-off) ---------- */
+.add-task-btn { margin-left: 6px; }
+.score-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 13.5px; }
+.score-line .score-num { font-size: 24px; }
+.my-tasks { margin-top: 0; }
+.add-task { display: flex; gap: 8px; padding: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.add-task input { flex: 1 1 220px; }
+.task.todo-row { grid-template-columns: minmax(0, 1fr) auto; }
+.todo-title { overflow-wrap: anywhere; }
+.todo-row.done .todo-title { text-decoration: line-through; color: var(--muted); }
+.todo-actions { display: flex; align-items: center; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+@container (max-width: 680px) { .task.todo-row { grid-template-columns: minmax(0, 1fr); } .task.todo-row > div:nth-child(2) { grid-row: auto; grid-column: auto; justify-content: flex-start; } }

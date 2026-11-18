@@ -45,10 +45,27 @@ async function sessionAct(method, url, body) {
   return r;
 }
 
+// Other parts of Today (e.g. a "My tasks" row) can open the Start form with a prefilled task.
+const startRequests = new Set();
+export function requestStart(prefill) {
+  if (store.session) { toast({ msg: 'A session is already running — end it first', kind: 'error' }); return false; }
+  startRequests.forEach(fn => fn(prefill));
+  return true;
+}
+
 export function FocusPanel({ today, tz }) {
   const { session, off, loaded } = useSession();
   const [mode, setMode] = useState(null); // 'start' | 'off' | 'stop'
   const [ended, setEnded] = useState(null); // last finished session, for the result + milestone question
+  const [prefill, setPrefill] = useState(null);
+  const ref = useRef();
+  useEffect(() => {
+    const fn = (p) => {
+      setPrefill({ ...p, key: Date.now() }); setMode('start');
+      setTimeout(() => { ref.current?.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }, 30);
+    };
+    startRequests.add(fn); return () => startRequests.delete(fn);
+  }, []);
 
   // Refresh exactly when the coding pause ends so the prompt comes back.
   useEffect(() => {
@@ -73,7 +90,8 @@ export function FocusPanel({ today, tz }) {
   }
 
   const result = ended && html`<${EndedResult} s=${ended} onClose=${() => setEnded(null)} />`;
-  if (mode === 'start') return html`<div class="stack">${result}<${StartForm} onCancel=${() => setMode(null)} onStarted=${() => { setMode(null); setEnded(null); }} /></div>`;
+  if (mode === 'start') return html`<div class="stack" ref=${ref}>${result}<${StartForm} key=${prefill ? prefill.key : 'new'} prefill=${prefill}
+    onCancel=${() => { setMode(null); setPrefill(null); }} onStarted=${() => { setMode(null); setEnded(null); setPrefill(null); }} /></div>`;
   if (mode === 'off' || mode === 'stop') {
     return html`<div class="stack">${result}<section class="card fp" aria-label="Pause coding">
       <div class="fp-head"><span class="label">${mode === 'stop' ? 'Stop coding' : 'Off'}</span><span class="spacer"></span>
@@ -230,11 +248,11 @@ function OffChooser({ today, onDone }) {
 
 const PRESETS = [[1500, '25 min'], [2700, '45 min'], [3600, '1 h'], [5400, '1 h 30'], [7200, '2 h']];
 
-function StartForm({ onCancel, onStarted }) {
+function StartForm({ onCancel, onStarted, prefill }) {
   const { data: projects } = useResource('/api/projects');
   const { data: cats } = useResource('/api/categories');
   const [proj, setProj] = useState('');
-  const [task, setTask] = useState('');
+  const [task, setTask] = useState(prefill && prefill.task_label ? prefill.task_label : '');
   const [milestone, setMilestone] = useState(null);
   const [cat, setCat] = useState('');
   const saved = (() => { try { return +localStorage.getItem('lastDurationSec') || 2700; } catch { return 2700; } })();
