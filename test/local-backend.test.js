@@ -143,3 +143,18 @@ test('one-off tasks are saved per account and per date in the browser build', as
   assert.equal(again.count.custom.done, 1);
   assert.equal((await backendFor(ls, B_ID).request('GET', '/api/today')).todos.length, 0, 'B never sees A’s tasks');
 });
+
+test('planning categories: a Pinterest project with no URL adds no account and no routine tasks', async () => {
+  const a = backendFor(new MemStorage(), A_ID);
+  const cats = await a.request('GET', '/api/categories');
+  const names = cats.map(c => c.name);
+  for (const n of ['YouTube', 'Instagram', 'Facebook', 'Pinterest']) assert.equal(names.filter(x => x === n).length, 1, n);
+  assert.equal(names.at(-1), 'Other');
+  const before = (await a.request('GET', '/api/today')).tasks.length;
+  const pin = cats.find(c => c.name === 'Pinterest').id;
+  await a.request('POST', '/api/projects', { name: 'Start a Pinterest account', category_id: pin, status: 'planned', links: [] });
+  const p = (await a.request('GET', '/api/projects')).find(x => x.name === 'Start a Pinterest account');
+  assert.equal(p.category_id, pin); assert.equal(p.status, 'planned'); assert.deepEqual(p.links, []);
+  assert.equal((await a.request('GET', '/api/assets')).length, 0);
+  assert.equal((await a.request('GET', '/api/today')).tasks.length, before);
+});

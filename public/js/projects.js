@@ -9,38 +9,53 @@ const TEMPLATES = {
 };
 const VIEWS = [['in_progress', 'In progress'], ['later', 'Later'], ['planned_date', 'Scheduled'], ['done', 'Done'], ['all', 'All']];
 const inView = (p, v) => v === 'all' || (v === 'later' ? ['idea', 'planned'].includes(p.status) : p.status === v);
+// Card badge, named like the status tabs (Later keeps the detail: idea or undated plan).
+const statusLabel = (s) => ({ idea: 'Later · Idea', planned: 'Later · No date', planned_date: 'Scheduled', in_progress: 'In progress', done: 'Done' })[s] || s;
 const when = (p) => p.planned_for ? (p.planned_for.length === 7 ? 'around ' + fmtMonth(p.planned_for) : fmtDay(p.planned_for, { day: 'numeric', month: 'short', year: 'numeric' })) : '';
 
 export function Projects() {
   const { data: projects } = useResource('/api/projects');
   const { data: cats } = useResource('/api/categories');
+  // Two browsing modes: a status tab shows that status across every category (grouped by category);
+  // a category button shows every project in that category, whatever its status. Picking one resets the other.
   const [view, setView] = useState('in_progress');
   const [cat, setCat] = useState(null);
   const [open, setOpen] = useState(null);
   const [creating, setCreating] = useState(false);
   if (!projects || !cats) return html`<p class="muted">Loading…</p>`;
   const catOf = (id) => cats.find(c => c.id === id);
+  const pickView = (k) => { setView(k); setCat(null); };
+  const pickCat = (id) => { setCat(id); setView('all'); };
   const list = projects.filter(p => inView(p, view) && (!cat || p.category_id === cat));
   const cur = open && projects.find(p => p.id === open);
-  return html`<div>
-    <header class="page-head"><h1>Projects</h1><span class="spacer"></span>
-      <button class="btn primary" onClick=${() => setCreating(true)}><${Icon} name="plus" size=${16} />New project</button></header>
-    <div class="tabs" role="tablist">${VIEWS.map(([k, l]) => html`<button role="tab" aria-selected=${view === k} class=${view === k ? 'on' : ''} onClick=${() => setView(k)}>${l}<span class="count">${projects.filter(p => inView(p, k)).length}</span></button>`)}</div>
-    ${view === 'later' && html`<p class="notice blue" style="margin-bottom:14px">Ideas and undated plans: they stay visible here, without fake deadlines.</p>`}
-    <div class="row wrap" style="margin-bottom:14px">
-      <button class=${'btn sm' + (!cat ? ' dark' : '')} onClick=${() => setCat(null)}>All</button>
-      ${cats.map(c => html`<button class=${'btn sm' + (cat === c.id ? ' dark' : '')} onClick=${() => setCat(c.id)}>${c.name}</button>`)}
-    </div>
-    ${list.length === 0 ? html`<${Empty} title="Nothing here yet">Add an IPTV country, a blog topic or a digital product.</${Empty}>`
-      : html`<div class="cards">${list.map(p => html`<button key=${p.id} class="card pcard" onClick=${() => setOpen(p.id)}>
-        <div class="row wrap">${catOf(p.category_id) && html`<${Chip} color=${catOf(p.category_id).color}>${catOf(p.category_id).name}</${Chip}>`}<${Chip} color=${STATUS_COLOR[p.status]}>${STATUS[p.status]}</${Chip}></div>
+  const card = (p) => html`<button key=${p.id} class="card pcard" onClick=${() => setOpen(p.id)}>
+        <div class="row wrap">${catOf(p.category_id) && html`<${Chip} color=${catOf(p.category_id).color}>${catOf(p.category_id).name}</${Chip}>`}<${Chip} color=${STATUS_COLOR[p.status]} title=${STATUS[p.status]}>${statusLabel(p.status)}</${Chip}></div>
         <h3>${p.name}</h3>
         ${p.topic && html`<p class="muted small" style="margin-top:-6px">${p.topic}${when(p) && ' · ' + when(p)}</p>`}
         ${!p.topic && when(p) && html`<p class="muted small" style="margin-top:-6px">${when(p)}</p>`}
         ${p.milestones.length > 0 && html`<div><div class="steps" aria-hidden="true">${p.milestones.map(m => html`<i class=${m.done ? 'on' : ''}></i>`)}</div>
           <p class="small muted num" style="margin-top:5px">${p.progress.done}/${p.progress.total} milestones · ${p.progress.pct}%</p></div>`}
         ${p.next_action && html`<p class="small"><strong>Next action:</strong> ${p.next_action}</p>`}
-      </button>`)}</div>`}
+      </button>`;
+  // Without a category filter, results are grouped under category headings (empty groups hidden).
+  const groups = cat ? null : [...cats, { id: null, name: 'No category' }]
+    .map(c => ({ c, items: list.filter(p => (p.category_id ?? null) === c.id || (c.id === null && !catOf(p.category_id))) }))
+    .filter(g => g.items.length);
+  const selCat = cat && catOf(cat);
+  return html`<div>
+    <header class="page-head"><h1>Projects</h1><span class="spacer"></span>
+      <button class="btn primary" onClick=${() => setCreating(true)}><${Icon} name="plus" size=${16} />New project</button></header>
+    <div class="tabs" role="tablist" aria-label="Status">${VIEWS.map(([k, l]) => html`<button role="tab" aria-selected=${view === k} class=${view === k ? 'on' : ''} onClick=${() => pickView(k)}>${l}<span class="count">${projects.filter(p => inView(p, k)).length}</span></button>`)}</div>
+    ${view === 'later' && html`<p class="notice blue" style="margin-bottom:14px">Ideas and undated plans: they stay visible here, without fake deadlines.</p>`}
+    <div class="row wrap cat-filter" role="group" aria-label="Category" style="margin-bottom:14px">
+      <button class=${'btn sm' + (!cat ? ' dark' : '')} aria-pressed=${!cat} onClick=${() => setCat(null)}>All</button>
+      ${cats.map(c => html`<button class=${'btn sm' + (cat === c.id ? ' dark' : '')} aria-pressed=${cat === c.id} onClick=${() => pickCat(c.id)}>${c.name}</button>`)}
+    </div>
+    ${list.length === 0 ? html`<${Empty} title=${selCat ? `No ${selCat.name} projects yet` : 'Nothing here yet'}>${selCat ? 'Use “New project” to plan one.' : 'Add an IPTV country, a blog topic or a digital product.'}</${Empty}>`
+      : groups ? groups.map(g => html`<section key=${g.c.id ?? 'none'} class="pgroup" aria-label=${g.c.name}>
+          <div class="section-head"><h2 class="pgroup-title">${g.c.name}</h2><span class="muted small num">${g.items.length}</span></div>
+          <div class="cards">${g.items.map(card)}</div></section>`)
+      : html`<div class="cards">${list.map(card)}</div>`}
     ${creating && html`<${ProjectForm} cats=${cats} onClose=${() => setCreating(false)} />`}
     ${cur && html`<${ProjectDetail} p=${cur} cats=${cats} onClose=${() => setOpen(null)} />`}
   </div>`;
@@ -156,7 +171,7 @@ function ProjectDetail({ p, cats, onClose }) {
         <${Fields} f=${f} set=${set} cats=${cats} />
         ${p.links.length > 0 && html`<div class="row wrap" style="margin-top:8px">${p.links.map(l => html`<a class="btn sm" href=${l} target="_blank" rel="noopener noreferrer"><${Icon} name="link" size=${14} />${l.replace(/^https?:\/\//, '').slice(0, 40)}</a>`)}</div>`}
         <div class="form-actions">
-          ${confirmDel ? html`<span class="small">Delete permanently?</span><button type="button" class="btn danger" onClick=${async () => { await act('DELETE', `/api/projects/${p.id}`); onClose(); }}>Yes, delete</button><button type="button" class="btn" onClick=${() => setConfirmDel(false)}>Non</button>`
+          ${confirmDel ? html`<span class="small">Delete permanently?</span><button type="button" class="btn danger" onClick=${async () => { await act('DELETE', `/api/projects/${p.id}`); onClose(); }}>Yes, delete</button><button type="button" class="btn" onClick=${() => setConfirmDel(false)}>No</button>`
             : html`<button type="button" class="btn ghost danger" onClick=${() => setConfirmDel(true)}>Delete</button>`}
           <span class="spacer"></span>
           <button class="btn primary">Save</button>
