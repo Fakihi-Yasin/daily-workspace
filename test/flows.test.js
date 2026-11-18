@@ -412,3 +412,56 @@ test('10. My tasks + daily score count: the 4 / 11 · 36% example; timers never 
     } finally { await stop(srv2); }
   } catch (e) { await stop(srv).catch(() => {}); throw e; }
 });
+
+test('11. unfinished one-off tasks carry over as Overdue; completion credits only the day it happens', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tableau-overdue-'));
+  const srv = await startServer(dir, 4514);
+  const c = (m, u, body) => call(m, u, body, 'http://127.0.0.1:4514');
+  const shift = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  try {
+    const t = (await c('GET', '/api/bootstrap')).today;
+    const y = shift(t, -1), y3 = shift(t, -3);
+    // "Yesterday" I added Fix DMCA and didn't finish it; also an older open task, a finished one, and a deleted one.
+    const fix = await c('POST', '/api/todos', { date: y, title: 'Fix DMCA' });
+    const old = await c('POST', '/api/todos', { date: y3, title: 'Renew domain' });
+    const fin = await c('POST', '/api/todos', { date: y, title: 'Finished yesterday' });
+    await c('PUT', `/api/todos/${fin.id}`, { done: true, on: y });
+    const gone = await c('POST', '/api/todos', { date: y, title: 'Deleted one' });
+    await c('DELETE', `/api/todos/${gone.id}`);
+    const yBefore = (await c('GET', `/api/today?date=${y}`)).count;
+
+    let d = await c('GET', '/api/today');
+    const od = d.todos.filter(x => x.overdue);
+    assert.deepEqual(od.map(x => x.title), ['Renew domain', 'Fix DMCA'], 'overdue: oldest first, each once; finished/deleted not carried');
+    assert.equal(d.todos.filter(x => x.title === 'Renew domain').length, 1, 'a task overdue for several days appears once');
+    assert.ok(!d.tasks.some(x => x.origin_task_id), 'recurring routines are not carried over');
+    const recurringTotal = d.count.recurring.total;
+    assert.deepEqual([d.count.custom.total, d.count.custom.done, d.count.total], [2, 0, recurringTotal + 2], 'each overdue task counts once today');
+
+    // A timer alone doesn't complete it.
+    const s = await c('POST', '/api/session/start', { task_label: 'Fix DMCA', duration_sec: 600 });
+    await c('POST', `/api/session/${s.id}/finish`);
+    assert.equal((await c('GET', '/api/today')).count.custom.done, 0);
+
+    // Done today → credit today, yesterday unchanged.
+    await c('PUT', `/api/todos/${fix.id}`, { done: true });
+    d = await c('GET', '/api/today');
+    assert.equal(d.count.custom.done, 1, 'today gets the credit');
+    assert.equal(d.todos.find(x => x.id === fix.id).done_for_day, 1);
+    assert.deepEqual((await c('GET', `/api/today?date=${y}`)).count, yBefore, 'yesterday’s score not rewritten');
+    const st = await c('GET', `/api/stats?from=${y}&to=${t}`);
+    assert.equal(st.daily.find(x => x.date === y).done, yBefore.done, 'Stats: yesterday unchanged');
+    assert.equal(st.daily.find(x => x.date === t).done, d.count.done, 'Stats: today credited');
+
+    // Stays until done or deleted; never shows on a future day; doesn't come back once done.
+    assert.ok(!(await c('GET', `/api/today?date=${shift(t, 1)}`)).todos.some(x => x.overdue), 'no overdue on future days');
+    await c('DELETE', `/api/todos/${old.id}`);
+    d = await c('GET', '/api/today');
+    assert.deepEqual(d.todos.filter(x => x.overdue && !x.done_for_day).map(x => x.title), [], 'nothing left overdue');
+    assert.deepEqual(d.todos.filter(x => x.overdue).map(x => x.title), ['Fix DMCA'], 'done-today task still listed today (as done)');
+    // Reopening today puts it back to overdue and removes today's credit.
+    await c('PUT', `/api/todos/${fix.id}`, { done: false });
+    d = await c('GET', '/api/today');
+    assert.deepEqual([d.count.custom.done, d.todos.find(x => x.id === fix.id).overdue], [0, true]);
+  } finally { await stop(srv); }
+});

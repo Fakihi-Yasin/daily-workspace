@@ -13,10 +13,20 @@ export function Today() {
   const [over, setOver] = useState({}); // optimistic marks: key -> bool
   const [todoOver, setTodoOver] = useState({}); // optimistic one-off task changes: id -> { done } | { gone: true }
   const [pending, setPending] = useState([]); // one-off tasks being saved
-  const [adding, setAdding] = useState(false);
+  const [overdueShown, setOverdueShown] = useState(null); // { date, ids:Set } — rows laid out in "Overdue" (settles after the undo window)
   const [settled, setSettled] = useState(null); // { date, ids:Set } — which tasks are laid out as completed
   const [doneOpen, setDoneOpen] = useState(() => { try { return localStorage.getItem('completedOpen') !== '0'; } catch { return true; } });
   useEffect(() => { setOver({}); setTodoOver({}); setPending([]); }, [data]);
+  // An overdue task marked done stays in the Overdue list during the undo window, then moves down.
+  useEffect(() => {
+    if (!data) return;
+    const ids = new Set(data.todos.filter(t => t.overdue && !t.done_for_day).map(t => t.id));
+    if (!overdueShown || overdueShown.date !== data.date) { setOverdueShown({ date: data.date, ids }); return; }
+    const added = [...ids].filter(i => !overdueShown.ids.has(i));
+    if (added.length) { setOverdueShown({ date: data.date, ids: new Set([...overdueShown.ids, ...added]) }); }
+    const t = setTimeout(() => setOverdueShown({ date: data.date, ids }), SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [data]);
   // Rows move between "to do" and "completed" only after the undo window, never under the cursor.
   useEffect(() => {
     if (!data) return;
@@ -35,7 +45,8 @@ export function Today() {
   const assets = new Map(data.assets.map(a => [a.id, a]));
   const cats = [...new Set(data.tasks.map(t => t.category))];
   const todos = [...data.todos.filter(t => !(todoOver[t.id] && todoOver[t.id].gone)).map(t => (todoOver[t.id] ? { ...t, ...todoOver[t.id] } : t)), ...pending];
-  const ctx = { data, assets, over, setOver, isToday, todos, setTodoOver, setPending };
+  const overdueIds = overdueShown && overdueShown.date === data.date ? overdueShown.ids : new Set();
+  const ctx = { data, assets, over, setOver, isToday, todos, setTodoOver, setPending, overdueIds };
   const count = liveCount(ctx);
   const doneIds = settled.date === data.date ? settled.ids : new Set();
   const openTasks = data.tasks.filter(t => !doneIds.has(t.id));
@@ -51,8 +62,6 @@ export function Today() {
         <strong class="cap">${fmtDay(data.date)}</strong>
         <button class="icon-btn" aria-label="Next day" onClick=${() => setDate(addDays(data.date, 1))}><${Icon} name="chevR" /></button>
         ${!isToday && html`<button class="btn sm" onClick=${() => setDate(null)}>Back to today</button>`}
-        <button class="btn sm add-task-btn" aria-expanded=${adding} onClick=${() => { setAdding(true); setTimeout(() => document.getElementById('add-task-input')?.focus(), 30); }}>
-          <${Icon} name="plus" size=${15} />Add task</button>
       </div>
     </header>
     ${!isToday && html`<p class="notice" style="margin-bottom:14px">${data.date < data.today
@@ -69,8 +78,8 @@ export function Today() {
       </aside>
 
       <div class="tg-tasks">
-        ${(todos.length > 0 || adding) && html`<${MyTasks} ctx=${ctx} adding=${adding} setAdding=${setAdding} />`}
-        ${data.tasks.length === 0 && (todos.length > 0 || adding) ? html`<p class="small muted">No recurring routines scheduled ${isToday ? 'today' : 'this day'} · <a href="#/settings?tab=routines">Set up routines</a></p>`
+        <${MyTasks} ctx=${ctx} />
+        ${data.tasks.length === 0 && todos.length > 0 ? html`<p class="small muted">No recurring routines scheduled ${isToday ? 'today' : 'this day'} · <a href="#/settings?tab=routines">Set up routines</a></p>`
         : data.tasks.length === 0
           ? html`<div class="card empty-routines">
               <h3>No routines scheduled ${isToday ? 'today' : 'this day'}</h3>
@@ -98,7 +107,7 @@ function liveCount(ctx) {
   const due = ctx.data.tasks.filter(t => t.progress.scoreTarget > 0);
   const isDone = (t) => liveDone(ctx, t).scoreDone >= t.progress.scoreTarget;
   const rDone = due.filter(isDone).length;
-  const cDone = ctx.todos.filter(t => t.done).length;
+  const cDone = ctx.todos.filter(t => t.done_for_day).length;
   const done = rDone + cDone, total = due.length + ctx.todos.length;
   const cats = new Map();
   for (const t of due) { const c = cats.get(t.category) || { category: t.category, done: 0, total: 0 }; c.total++; if (isDone(t)) c.done++; cats.set(t.category, c); }
@@ -128,12 +137,14 @@ function ScoreCard({ count }) {
 }
 
 // ---------- My tasks (one-off, for this date only) ----------
+// Done credits the day being viewed (normally today) — never rewrites an earlier day.
 async function setTodoDone(ctx, t, done) {
-  ctx.setTodoOver(o => ({ ...o, [t.id]: { done: done ? 1 : 0 } }));
+  const on = ctx.data.date;
+  ctx.setTodoOver(o => ({ ...o, [t.id]: { done: done ? 1 : 0, done_for_day: done ? 1 : 0, done_on: done ? on : null } }));
   try {
-    await api('PUT', `/api/todos/${t.id}`, { done });
+    await api('PUT', `/api/todos/${t.id}`, { done, on });
     bus.emit();
-    toast({ msg: `${t.title} · ${done ? 'done' : 'reopened'}`, undo: async () => { await api('PUT', `/api/todos/${t.id}`, { done: !done }); bus.emit(); } });
+    toast({ msg: `${t.title} · ${done ? 'done' : 'reopened'}`, undo: async () => { await api('PUT', `/api/todos/${t.id}`, { done: !done, on }); bus.emit(); } });
   } catch (e) { ctx.setTodoOver(o => { const n = { ...o }; delete n[t.id]; return n; }); toast({ msg: e.message, kind: 'error' }); }
 }
 async function deleteTodo(ctx, t) {
@@ -141,38 +152,47 @@ async function deleteTodo(ctx, t) {
   try {
     await api('DELETE', `/api/todos/${t.id}`);
     bus.emit();
-    toast({ msg: `Deleted “${t.title}”`, undo: async () => { await api('POST', '/api/todos', { date: t.date, title: t.title, done: !!t.done, sort: t.sort }); bus.emit(); } });
+    toast({ msg: `Deleted “${t.title}”`, undo: async () => { await api('POST', '/api/todos', { date: t.date, title: t.title, done: !!t.done, done_on: t.done_on, sort: t.sort }); bus.emit(); } });
   } catch (e) { ctx.setTodoOver(o => { const n = { ...o }; delete n[t.id]; return n; }); toast({ msg: e.message, kind: 'error' }); }
 }
 
-function MyTasks({ ctx, adding, setAdding }) {
+function MyTasks({ ctx }) {
   const [title, setTitle] = useState('');
-  const todos = ctx.todos;
-  const done = todos.filter(t => t.done).length;
+  const overdue = ctx.todos.filter(t => ctx.overdueIds.has(t.id));
+  const rest = ctx.todos.filter(t => !ctx.overdueIds.has(t.id));
+  const done = ctx.todos.filter(t => t.done_for_day).length;
   const add = async (e) => {
     e.preventDefault();
     const v = title.trim();
     if (!v) return;
-    const temp = { id: 'tmp-' + Date.now(), date: ctx.data.date, title: v, done: 0, temp: true };
+    const temp = { id: 'tmp-' + Date.now(), date: ctx.data.date, title: v, done: 0, done_for_day: 0, temp: true };
     ctx.setPending(p => [...p, temp]);
-    setTitle('');
+    setTitle(''); // ready for the next one
     try { await api('POST', '/api/todos', { date: ctx.data.date, title: v }); bus.emit(); }
     catch (err) { ctx.setPending(p => p.filter(x => x.id !== temp.id)); toast({ msg: err.message, kind: 'error' }); }
   };
   return html`<section class="section routine my-tasks" id="my-tasks" aria-label="My tasks">
     <div class="routine-head">
       <h3>My tasks</h3>
-      ${todos.length > 0 && html`<span class="num rh-num">${done}/${todos.length} done</span>`}
+      ${ctx.todos.length > 0 && html`<span class="num rh-num">${done}/${ctx.todos.length} done</span>`}
     </div>
-    ${adding && html`<form class="card add-task" onSubmit=${add} onKeyDown=${(e) => { if (e.key === 'Escape') { e.preventDefault(); setAdding(false); } }}>
-      <input id="add-task-input" type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} maxlength="200"
-        placeholder=${'Task for ' + (ctx.isToday ? 'today' : fmtShort(ctx.data.date)) + ', e.g. Fix DMCA'} aria-label="New task title" autofocus />
-      <button class="btn primary" disabled=${!title.trim()}>Add</button>
-      <button type="button" class="btn ghost" onClick=${() => setAdding(false)}>Close</button>
-    </form>`}
-    ${todos.length > 0 && html`<div class="task-list">${todos.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>`}
+    ${overdue.length > 0 && html`<div class="overdue-block" role="region" aria-label=${'Overdue, ' + overdue.length + ' task' + (overdue.length === 1 ? '' : 's')}>
+      <div class="overdue-head"><${Icon} name="alert" size=${15} /><span>Overdue</span><span class="overdue-count">${overdue.length}</span></div>
+      <div class="task-list">${overdue.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>
+    </div>`}
+    ${rest.length > 0 && html`<div class="task-list">${rest.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>`}
+    <form class="add-task-inline" onSubmit=${add}>
+      <input id="add-task-input" type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} maxlength="200" enterkeyhint="done" autocomplete="off"
+        placeholder=${ctx.isToday ? 'Add a task for today…' : `Add a task for ${fmtShort(ctx.data.date)}…`} aria-label="New task title" />
+      <button class="btn sm primary" disabled=${!title.trim()} aria-label="Add task"><${Icon} name="plus" size=${14} />Add</button>
+    </form>
   </section>`;
 }
+
+const overdueLabel = (from, day) => {
+  const n = Math.round((new Date(day + 'T12:00:00Z') - new Date(from + 'T12:00:00Z')) / 86400000);
+  return n === 1 ? 'Overdue · from yesterday' : `Overdue · from ${fmtShort(from)} (${n} days)`;
+};
 
 function TodoRow({ t, ctx }) {
   const [editing, setEditing] = useState(false);
@@ -192,13 +212,18 @@ function TodoRow({ t, ctx }) {
     try { await api('PUT', `/api/todos/${t.id}`, { title }); bus.emit(); setEditing(false); } catch (err) { toast({ msg: err.message, kind: 'error' }); }
   };
   const doneAt = t.done && t.done_at ? new Date(t.done_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
-  return html`<div class=${'task todo-row' + (t.done ? ' done' : '')} id=${'todo-' + t.id}>
+  const late = t.overdue && !t.done_for_day;
+  const status = t.temp ? 'Saving…'
+    : t.done_for_day ? `Done${doneAt && t.done_on === ctx.data.today ? ' at ' + doneAt : ''}${t.overdue ? ' · was ' + overdueLabel(t.date, ctx.data.date).toLowerCase() : ''}`
+    : t.done ? `Done later · ${fmtShort(t.done_on)}`
+    : late ? overdueLabel(t.date, ctx.data.date) : 'One-off task';
+  return html`<div class=${'task todo-row' + (t.done_for_day ? ' done' : '') + (late ? ' overdue' : '')} id=${'todo-' + t.id}>
     <div class="tname">
       ${editing
         ? html`<form class="row" onSubmit=${saveTitle}><input type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} aria-label="Task title" autofocus
             onKeyDown=${(e) => { if (e.key === 'Escape') { setTitle(t.title); setEditing(false); } }} /><button class="btn sm primary">Save</button></form>`
-        : html`<span class="todo-title">${t.title}</span>
-          <small>${t.temp ? 'Saving…' : t.done ? `Done${doneAt ? ' at ' + doneAt : ''}` : 'One-off task'}</small>`}
+        : html`<span class="todo-title">${late && html`<span class="od-dot" aria-hidden="true"></span>`}${t.title}</span>
+          <small class=${late ? 'od-label' : ''}>${late && html`<${Icon} name="alert" size=${13} /> `}${status}</small>`}
     </div>
     <div class="todo-actions">
       <button class="btn sm" disabled=${t.temp || !!t.done} onClick=${() => requestStart({ task_label: t.title })} aria-label=${'Start a session: ' + t.title}>
@@ -325,8 +350,12 @@ function NextAction({ ctx }) {
   const [skip, setSkip] = useState(0);
   const { data } = ctx;
   const order = [...data.tasks].sort((x, y) => (x.time_slot || '99') < (y.time_slot || '99') ? -1 : (x.time_slot || '99') > (y.time_slot || '99') ? 1 : x.sort - y.sort);
-  const steps = [...order.map(t => ({ t, s: nextStep(ctx, t) })).filter(x => x.s),
-    ...ctx.todos.filter(t => !t.done && !t.temp).map(t => ({ todo: t, t: { category: 'My tasks', time_slot: '' }, s: { what: t.title, detail: 'One-off task', btn: 'Done' } }))];
+  const todoStep = (t) => ({ todo: t, t: { category: t.overdue ? 'Overdue' : 'My tasks', time_slot: '' }, s: { what: t.title, detail: t.overdue ? overdueLabel(t.date, ctx.data.date) : 'One-off task', btn: 'Done' } });
+  const open = (t) => !t.done_for_day && !t.done && !t.temp;
+  // Overdue first, then routines, then today's own tasks.
+  const steps = [...ctx.todos.filter(t => t.overdue && open(t)).map(todoStep),
+    ...order.map(t => ({ t, s: nextStep(ctx, t) })).filter(x => x.s),
+    ...ctx.todos.filter(t => !t.overdue && open(t)).map(todoStep)];
   const cur = steps.length ? steps[skip % steps.length] : null;
   const { left, total } = liveCount(ctx);
   if (!total) return null;
@@ -334,7 +363,7 @@ function NextAction({ ctx }) {
     <div class="row"><span class="label" style="flex:1">Next action</span>
       ${steps.length > 1 && html`<button class="btn sm ghost" onClick=${() => setSkip(skip + 1)}>Skip →</button>`}</div>
     ${cur ? html`
-      <div class="row wrap" style="gap:6px"><${Chip} color="blue">${cur.t.category}</${Chip}>${cur.t.time_slot && html`<${Chip}>${cur.t.time_slot}</${Chip}>`}</div>
+      <div class="row wrap" style="gap:6px"><${Chip} color=${cur.t.category === 'Overdue' ? 'pink' : 'blue'}>${cur.t.category}</${Chip}>${cur.t.time_slot && html`<${Chip}>${cur.t.time_slot}</${Chip}>`}</div>
       <div class="what">${cur.s.what}</div>
       <p class="small muted">${cur.s.detail}</p>
       ${cur.todo
