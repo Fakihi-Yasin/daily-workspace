@@ -176,16 +176,19 @@ function MyTasks({ ctx }) {
       <h3>My tasks</h3>
       ${ctx.todos.length > 0 && html`<span class="num rh-num">${done}/${ctx.todos.length} done</span>`}
     </div>
+    <form class="add-task-card" onSubmit=${add}>
+      <label for="add-task-input" class="add-task-label">Add a task${ctx.isToday ? '' : ` for ${fmtShort(ctx.data.date)}`}</label>
+      <div class="add-task-row">
+        <input id="add-task-input" type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} maxlength="200" enterkeyhint="done" autocomplete="off"
+          placeholder=${ctx.isToday ? 'Task title, e.g. Fix DMCA' : 'Task title'} />
+        <button class="btn primary" disabled=${!title.trim()}><${Icon} name="plus" size=${15} />Add task</button>
+      </div>
+    </form>
     ${overdue.length > 0 && html`<div class="overdue-block" role="region" aria-label=${'Overdue, ' + overdue.length + ' task' + (overdue.length === 1 ? '' : 's')}>
       <div class="overdue-head"><${Icon} name="alert" size=${15} /><span>Overdue</span><span class="overdue-count">${overdue.length}</span></div>
       <div class="task-list">${overdue.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>
     </div>`}
     ${rest.length > 0 && html`<div class="task-list">${rest.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>`}
-    <form class="add-task-inline" onSubmit=${add}>
-      <input id="add-task-input" type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} maxlength="200" enterkeyhint="done" autocomplete="off"
-        placeholder=${ctx.isToday ? 'Add a task for today…' : `Add a task for ${fmtShort(ctx.data.date)}…`} aria-label="New task title" />
-      <button class="btn sm primary" disabled=${!title.trim()} aria-label="Add task"><${Icon} name="plus" size=${14} />Add</button>
-    </form>
   </section>`;
 }
 

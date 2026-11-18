@@ -559,7 +559,11 @@ dl.kv dd { margin: 0; overflow-wrap: anywhere; }
 .todo-row.overdue { box-shadow: inset 4px 0 0 var(--danger); }
 .od-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--danger); margin-right: 8px; vertical-align: middle; position: relative; top: -1px; }
 .tname small.od-label { color: var(--danger); font-weight: 650; display: flex; align-items: center; gap: 4px; }
-.add-task-inline { display: flex; gap: 8px; margin-top: 10px; }
-.add-task-inline input { flex: 1; min-width: 0; min-height: 40px; }
-.add-task-inline .btn { min-height: 40px; padding: 0 14px; }
-@media (max-width: 720px) { .add-task-inline input { font-size: 16px; } }
+
+/* Add task card (top of My tasks) */
+.add-task-card { background: var(--blue-soft); border: 1px solid color-mix(in srgb, var(--blue) 22%, transparent); border-radius: var(--radius); padding: 10px 12px 12px; margin-bottom: 12px; }
+.add-task-label { display: block; font-weight: 700; font-size: 13px; margin-bottom: 6px; color: var(--ink); }
+.add-task-row { display: flex; gap: 8px; }
+.add-task-row input { flex: 1; min-width: 0; min-height: 40px; background: var(--card); }
+.add-task-row .btn { min-height: 40px; padding: 0 14px; flex: none; }
+@media (max-width: 720px) { .add-task-row input { font-size: 16px; } }
