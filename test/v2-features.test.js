@@ -276,3 +276,22 @@ test('reading Today does not create a new revision (sync stays quiet)', async ()
   await r('GET', '/api/today'); await r('GET', '/api/history/scores');
   assert.equal(be.ls.getItem('dash.v1.u.' + encodeURIComponent(ME) + '.real.rev'), rev);
 });
+
+test('a multiline entry with a bullet is ONE task: lines and bullets kept through refresh and backup', async () => {
+  let be = backend(); let r = req(be);
+  const t = (await r('GET', '/api/bootstrap')).today;
+  const before = (await r('GET', '/api/today')).count;
+  const title = 'Préparer le lancement.\r\nUne fois prêt, vérifier :\n• Vérifier le lien';
+  const created = await r('POST', '/api/todos', { title, date: t });
+  assert.equal(created.title, 'Préparer le lancement.\nUne fois prêt, vérifier :\n• Vérifier le lien', 'line breaks normalised and kept');
+  let d = await r('GET', '/api/today');
+  assert.equal(d.todos.length, 1, 'one task, not three');
+  assert.equal(d.todos[0].subtasks.length, 0, 'no subtasks created');
+  assert.equal(d.count.total, before.total + 1, 'daily count +1 only');
+  await r('PUT', `/api/todos/${created.id}`, { title: created.title + '\n• Second bullet' });
+  be = reload(be); r = req(be);
+  d = await r('GET', '/api/today');
+  assert.equal(d.todos[0].title.split('\n').length, 4);
+  const out = await r('GET', '/api/backup');
+  assert.ok(out.tables.todos[0].title.endsWith('\n• Second bullet'));
+});

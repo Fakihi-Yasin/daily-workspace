@@ -1,5 +1,5 @@
 // "Today": the routine checklist first, with a compact focus panel and a right column (score, next action, sessions).
-import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, Modal, AutoGrow, fmtDay, fmtShort, addDays, fmtDur, pct } from './lib.js';
+import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, Modal, AutoGrow, TaskText, firstLine, fmtDay, fmtShort, addDays, fmtDur, pct } from './lib.js';
 import { FocusPanel, requestStart } from './focus.js';
 import { CompletedModal } from './history.js';
 
@@ -167,7 +167,7 @@ async function setTodoDone(ctx, t, done, subtasks) {
   try {
     await api('PUT', `/api/todos/${t.id}`, { done, on, ...(subtasks ? { subtasks } : {}) });
     bus.emit();
-    toast({ msg: `${t.title} · ${done ? 'done' : 'reopened'}`, undo: async () => { await api('PUT', `/api/todos/${t.id}`, { done: !done, on }); bus.emit(); } });
+    toast({ msg: `${firstLine(t.title)} · ${done ? 'done' : 'reopened'}`, undo: async () => { await api('PUT', `/api/todos/${t.id}`, { done: !done, on }); bus.emit(); } });
   } catch (e) { ctx.setTodoOver(o => { const n = { ...o }; delete n[t.id]; return n; }); toast({ msg: e.message, kind: 'error' }); }
 }
 async function deleteTodo(ctx, t) {
@@ -175,7 +175,7 @@ async function deleteTodo(ctx, t) {
   try {
     const r = await api('DELETE', `/api/todos/${t.id}`);
     bus.emit();
-    toast({ msg: `Deleted “${t.title.length > 60 ? t.title.slice(0, 60) + '…' : t.title}”`, undo: async () => { await api('POST', '/api/todos/undelete', { deleted: r.deleted, subtasks: r.subtasks }); bus.emit(); } });
+    toast({ msg: `Deleted “${firstLine(t.title).slice(0, 60)}”`, undo: async () => { await api('POST', '/api/todos/undelete', { deleted: r.deleted, subtasks: r.subtasks }); bus.emit(); } });
   } catch (e) { ctx.setTodoOver(o => { const n = { ...o }; delete n[t.id]; return n; }); toast({ msg: e.message, kind: 'error' }); }
 }
 
@@ -185,9 +185,10 @@ function MyTasks({ ctx }) {
   const overdue = ctx.todos.filter(t => ctx.overdueIds.has(t.id));
   const rest = ctx.todos.filter(t => !ctx.overdueIds.has(t.id));
   const done = ctx.todos.filter(t => t.done_for_day).length;
+  // One entry = ONE task: new lines and bullets are formatting inside its title.
   const add = async (e) => {
-    e.preventDefault();
-    const v = title.trim();
+    if (e) e.preventDefault();
+    const v = title.replace(/\r\n?/g, '\n').replace(/\s+$/, '').replace(/^\s*\n/, '');
     if (!v) return;
     const temp = { id: 'tmp-' + Date.now(), date: ctx.data.date, title: v, done: 0, done_for_day: 0, temp: true };
     ctx.setPending(p => [...p, temp]);
@@ -203,8 +204,8 @@ function MyTasks({ ctx }) {
     <form class="add-task-card" onSubmit=${add}>
       <label for="add-task-input" class="add-task-label">Add a task${ctx.isToday ? '' : ` for ${fmtShort(ctx.data.date)}`}</label>
       <div class="add-task-row">
-        <input id="add-task-input" type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} maxlength="1000" enterkeyhint="done" autocomplete="off"
-          placeholder=${ctx.isToday ? 'Task title, e.g. Fix DMCA' : 'Task title'} />
+        <${AutoGrow} id="add-task-input" value=${title} onInput=${setTitle} onSave=${() => add()} autofocus=${false} enterkeyhint="done"
+          label=${'Add a task' + (ctx.isToday ? '' : ` for ${fmtShort(ctx.data.date)}`)} placeholder=${ctx.isToday ? 'Task title, e.g. Fix DMCA' : 'Task title'} />
         <button class="btn primary" disabled=${!title.trim()}><${Icon} name="plus" size=${15} />Add task</button>
       </div>
     </form>
@@ -237,7 +238,7 @@ async function cancelTodo(ctx, t, cancel) {
   try {
     await api('POST', `/api/todos/${t.id}/${cancel ? 'cancel' : 'reopen'}`);
     bus.emit();
-    toast({ msg: `${t.title.length > 60 ? t.title.slice(0, 60) + '…' : t.title} · ${cancel ? 'cancelled' : 'reopened'}`,
+    toast({ msg: `${firstLine(t.title).slice(0, 60)} · ${cancel ? 'cancelled' : 'reopened'}`,
       undo: async () => { await api('POST', `/api/todos/${t.id}/${cancel ? 'reopen' : 'cancel'}`); bus.emit(); } });
   } catch (e) { ctx.setTodoOver(o => { const n = { ...o }; delete n[t.id]; return n; }); toast({ msg: e.message, kind: 'error' }); }
 }
@@ -289,22 +290,22 @@ function TodoRow({ t, ctx }) {
     <div class="tname">
       ${editing
         ? html`<${TitleEditor} value=${t.title} label="Task title" onSave=${saveTitle} onCancel=${() => setEditing(false)} />`
-        : html`<span class="todo-title">${late && html`<span class="od-dot" aria-hidden="true"></span>`}${t.title}</span>
+        : html`<span class="todo-title">${late && html`<span class="od-dot" aria-hidden="true"></span>`}<${TaskText} text=${t.title} /></span>
           <small class=${late ? 'od-label' : ''}>${late && html`<${Icon} name="alert" size=${13} /> `}${status}</small>
           ${subs.length > 0 && html`<button class="sub-progress" aria-expanded=${showSubs} onClick=${() => setSubsOpen(!subsOpen)}>
             <${Icon} name=${showSubs ? 'chevD' : 'chevR'} size=${14} />${t.sub_done}/${subs.length} subtasks done</button>`}`}
     </div>
     ${!editing && html`<div class="todo-actions">
       ${cancelled
-        ? html`<button class="btn sm" onClick=${() => cancelTodo(ctx, t, false)} aria-label=${'Reopen task: ' + t.title}><${Icon} name="undo" size=${14} />Reopen task</button>`
+        ? html`<button class="btn sm" onClick=${() => cancelTodo(ctx, t, false)} aria-label=${'Reopen task: ' + firstLine(t.title)}><${Icon} name="undo" size=${14} />Reopen task</button>`
         : html`
-          <button class="btn sm" disabled=${t.temp || !!t.done} onClick=${() => requestStart({ task_label: t.title })} aria-label=${'Start a session: ' + t.title}>
+          <button class="btn sm" disabled=${t.temp || !!t.done} onClick=${() => requestStart({ task_label: firstLine(t.title) })} aria-label=${'Start a session: ' + firstLine(t.title)}>
             <${Icon} name="play" size=${13} />Start</button>
           ${t.done
-            ? html`<button class="btn sm" disabled=${t.temp} onClick=${() => setTodoDone(ctx, t, false)} aria-label=${'Reopen: ' + t.title}><${Icon} name="undo" size=${14} />Reopen</button>`
-            : html`<button class="btn sm primary" disabled=${t.temp} onClick=${() => requestDone(ctx, t)} aria-label=${'Mark done: ' + t.title}><${Icon} name="check" size=${14} />Done</button>`}`}
+            ? html`<button class="btn sm" disabled=${t.temp} onClick=${() => setTodoDone(ctx, t, false)} aria-label=${'Reopen: ' + firstLine(t.title)}><${Icon} name="undo" size=${14} />Reopen</button>`
+            : html`<button class="btn sm primary" disabled=${t.temp} onClick=${() => requestDone(ctx, t)} aria-label=${'Mark done: ' + firstLine(t.title)}><${Icon} name="check" size=${14} />Done</button>`}`}
       <div class="menu" ref=${ref}>
-        <button class="icon-btn" disabled=${t.temp} aria-label=${'Options — ' + t.title} aria-expanded=${menu} onClick=${() => setMenu(!menu)}><${Icon} name="more" /></button>
+        <button class="icon-btn" disabled=${t.temp} aria-label=${'Options — ' + firstLine(t.title)} aria-expanded=${menu} onClick=${() => setMenu(!menu)}><${Icon} name="more" /></button>
         ${menu && html`<div class="menu-pop">
           <button class="item" onClick=${() => { setMenu(false); setEditing(true); }}><${Icon} name="note" size=${16} />Edit title</button>
           ${!cancelled && html`<button class="item" onClick=${() => { setMenu(false); setSubsOpen(true); setAdding(true); }}><${Icon} name="list" size=${16} />Add subtask</button>`}
@@ -330,17 +331,17 @@ function Subtasks({ t, ctx, adding, setAdding, readOnly }) {
     setTitle('');
     await call('POST', `/api/todos/${t.id}/subtasks`, { title: v });
   };
-  return html`<div class="subtasks" aria-label=${'Subtasks of ' + t.title}>
+  return html`<div class="subtasks" aria-label=${'Subtasks of ' + firstLine(t.title)}>
     ${subs.length > 0 && html`<ul class="sub-list">${subs.map(st => html`<li key=${st.id} class=${st.done ? 'done' : ''}>
       ${editId === st.id
         ? html`<${TitleEditor} value=${st.title} label="Subtask title" onCancel=${() => setEditId(null)}
             onSave=${async (v) => { await call('PUT', `/api/subtasks/${st.id}`, { title: v }); setEditId(null); }} />`
         : html`<label class="sub-check">
             <input type="checkbox" checked=${!!st.done} disabled=${readOnly} onChange=${(e) => call('PUT', `/api/subtasks/${st.id}`, { done: e.target.checked, on: ctx.data.date })} />
-            <span class="sub-title">${st.title}</span></label>
+            <span class="sub-title"><${TaskText} text=${st.title} /></span></label>
           ${!readOnly && html`<span class="sub-actions">
-            <button class="icon-btn sm" aria-label=${'Edit subtask: ' + st.title} onClick=${() => setEditId(st.id)}><${Icon} name="note" size=${15} /></button>
-            <button class="icon-btn sm" aria-label=${'Remove subtask: ' + st.title} onClick=${() => call('DELETE', `/api/subtasks/${st.id}`)}><${Icon} name="x" size=${15} /></button>
+            <button class="icon-btn sm" aria-label=${'Edit subtask: ' + firstLine(st.title)} onClick=${() => setEditId(st.id)}><${Icon} name="note" size=${15} /></button>
+            <button class="icon-btn sm" aria-label=${'Remove subtask: ' + firstLine(st.title)} onClick=${() => call('DELETE', `/api/subtasks/${st.id}`)}><${Icon} name="x" size=${15} /></button>
           </span>`}`}
     </li>`)}</ul>`}
     ${!readOnly && (adding
@@ -358,7 +359,7 @@ function DoneChoice({ t, ctx, onClose }) {
   const go = async (mode) => { onClose(); await setTodoDone(ctx, t, true, mode); };
   return html`<${Modal} title="Mark task done" onClose=${onClose}>
     <div class="stack">
-      <p><strong class="wrap-anywhere">${t.title}</strong></p>
+      <p><strong class="wrap-anywhere"><${TaskText} text=${t.title} /></strong></p>
       <p class="muted">${open} subtask${open === 1 ? ' is' : 's are'} not done yet.</p>
       <div class="row wrap">
         <button class="btn primary" onClick=${() => go('all')}><${Icon} name="check" size=${15} />Complete all subtasks</button>
@@ -477,7 +478,7 @@ function NextAction({ ctx }) {
   const [skip, setSkip] = useState(0);
   const { data } = ctx;
   const order = [...data.tasks].sort((x, y) => (x.time_slot || '99') < (y.time_slot || '99') ? -1 : (x.time_slot || '99') > (y.time_slot || '99') ? 1 : x.sort - y.sort);
-  const todoStep = (t) => ({ todo: t, t: { category: t.overdue ? 'Overdue' : 'My tasks', time_slot: '' }, s: { what: t.title, detail: t.overdue ? overdueLabel(t.date, ctx.data.date) : 'One-off task', btn: 'Done' } });
+  const todoStep = (t) => ({ todo: t, t: { category: t.overdue ? 'Overdue' : 'My tasks', time_slot: '' }, s: { what: html`<${TaskText} text=${t.title} />`, detail: t.overdue ? overdueLabel(t.date, ctx.data.date) : 'One-off task', btn: 'Done' } });
   const open = (t) => !t.done_for_day && !t.done && !t.temp;
   // Overdue first, then routines, then today's own tasks.
   const steps = [...ctx.todos.filter(t => t.overdue && open(t)).map(todoStep),

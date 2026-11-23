@@ -11,7 +11,7 @@ import { MiniTimer } from './focus.js';
 const ROUTES = [
   ['today', 'Today', 'today', Today],
   ['projects', 'Projects', 'projects', Projects],
-  ['youtube', 'YouTube', 'youtube', YouTube],
+  ['youtube', 'YouTube', 'youtube', YouTube, { hidden: true }], // page and data kept; reachable at #/youtube, not in the sidebar
   ['learning', 'Learning', 'formation', Formation],
   ['challenges', 'Challenges', 'challenges', Challenges],
   ['stats', 'Stats', 'stats', Stats],
@@ -34,7 +34,7 @@ function App() {
   return html`<div class="shell">
     <nav class="side" aria-label="Main navigation">
       <div class="brand"><i>✓</i><span>Dashboard</span></div>
-      ${ROUTES.map(([key, label, icon]) => html`<a class=${'nav-link' + (key === r[0] ? ' on' : '')} href=${'#/' + key} aria-current=${key === r[0] ? 'page' : undefined} title=${label}>
+      ${ROUTES.filter(r => !(r[4] && r[4].hidden)).map(([key, label, icon]) => html`<a class=${'nav-link' + (key === r[0] ? ' on' : '')} href=${'#/' + key} aria-current=${key === r[0] ? 'page' : undefined} title=${label}>
         <${Icon} name=${icon} /><span>${label}</span></a>`)}
       <div class="side-foot">
         <${MiniTimer} />

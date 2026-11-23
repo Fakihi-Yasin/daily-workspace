@@ -689,3 +689,18 @@ textarea.autogrow { display: block; width: 100%; min-height: 40px; resize: none;
   .modal-back { padding: 8px; align-items: end; }
   .modal { max-height: calc(100dvh - 16px); width: 100%; }
 }
+
+/* ---------- v3.1: multiline tasks, bottom spacing ---------- */
+.task-text { display: flex; flex-direction: column; gap: 1px; }
+.task-line { white-space: pre-wrap; }
+.task-bullets { margin: 2px 0 2px; padding-left: 1.25em; }
+.task-bullets li { padding-left: 2px; }
+.task-bullets li::marker { color: var(--muted); }
+.todo-row.done .task-bullets, .todo-row.cancelled .task-bullets { text-decoration: line-through; }
+.add-task-row { align-items: flex-end; }
+.add-task-row textarea.autogrow { flex: 1; min-width: 0; min-height: 40px; background: var(--card); font-weight: 500; }
+/* No blank area under the last section: toasts are fixed and take no space. A small margin stays on desktop;
+   on phones the bottom padding only clears the fixed navigation bar. */
+main { padding-bottom: 32px; }
+@media (max-width: 1100px) { main { padding-bottom: 28px; } }
+@media (max-width: 720px) { main { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); } }
