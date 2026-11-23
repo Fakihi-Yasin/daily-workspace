@@ -9,6 +9,8 @@ export async function createAuth() {
     error: null,
     user: id ? { id: 'test|' + id, email: id + '@test.invalid', name: id } : null,
     login: (who) => { if (!who) return; window.localStorage.setItem(KEY, who); window.location.replace('/' + window.location.hash); },
+    // Fake token for the test build's fake sync server (never a real credential).
+    getToken: async () => 'test-token.' + id,
     logout: () => { window.localStorage.removeItem(KEY); window.location.replace('/'); },
   };
 }

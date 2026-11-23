@@ -148,13 +148,28 @@ function ProjectDetail({ p, cats, onClose }) {
     await act('PUT', `/api/milestones/${a.id}`, { sort: b.sort === a.sort ? b.sort + d : b.sort });
     await act('PUT', `/api/milestones/${b.id}`, { sort: a.sort });
   };
+  // Status changes on its own (saved immediately), without opening a task or saving the whole form.
+  const changeStatus = async (status) => {
+    if (status === p.status) return;
+    if (status === 'planned_date' && !p.planned_for) {
+      set({ status }); toast({ msg: 'Pick a date or month under “Due” below, then Save.' }); return;
+    }
+    try { await act('PUT', `/api/projects/${p.id}`, { status }); set({ status }); toast({ msg: `Status: ${STATUS[status]}` }); } catch { /* toast shown by act */ }
+  };
   return html`<${Modal} title=${p.name} onClose=${onClose} wide>
     <div class="stack">
+      <div class="status-row">
+        <label for=${'pstatus-' + p.id} class="label">Status</label>
+        <select id=${'pstatus-' + p.id} class="status-select" value=${p.status} onChange=${(e) => changeStatus(e.target.value)}>
+          ${Object.entries(STATUS).map(([k, l]) => html`<option value=${k}>${l}</option>`)}
+        </select>
+        <${Chip} color=${STATUS_COLOR[p.status]}>${statusLabel(p.status)}</${Chip}>
+      </div>
       <div class="card flat">
         <div class="row"><h3 style="flex:1">Project progress</h3><strong class="num">${p.progress.total ? p.progress.pct + '%' : '—'}</strong></div>
         <div style="margin:8px 0 12px"><${Bar} value=${p.progress.pct || 0} color="mint" label="Project progress" /></div>
         <div class="mlist">${ms.map((m, i) => html`<div key=${m.id} class=${'mrow' + (m.done ? ' done' : '')}>
-          <input type="checkbox" class="checkline" style="width:18px;height:18px;accent-color:var(--blue)" checked=${!!m.done} aria-label=${'Milestone done: ' + m.title}
+          <input type="checkbox" class="checkline" style="width:18px;height:18px;accent-color:var(--accent)" checked=${!!m.done} aria-label=${'Milestone done: ' + m.title}
             onChange=${(e) => act('PUT', `/api/milestones/${m.id}`, { done: e.target.checked })} />
           <input type="text" value=${m.title} aria-label="Milestone name" onBlur=${(e) => e.target.value !== m.title && act('PUT', `/api/milestones/${m.id}`, { title: e.target.value })} />
           ${m.done_at && html`<span class="small muted" style="white-space:nowrap">${fmtDay(m.done_at, { day: 'numeric', month: 'short' })}</span>`}

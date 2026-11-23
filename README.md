@@ -12,7 +12,7 @@ A personal, **local-first, offline** dashboard: daily routines (blog articles, P
 |---|---|---|
 | Start | `npm start` → http://localhost:4321 | deployed from this repo, see **[DEPLOY.md](DEPLOY.md)** |
 | Sign-in | none (only you, on 127.0.0.1) | Auth0, invite-only, separate accounts |
-| Data | `data/tableau.sqlite` on this computer | this browser's localStorage, per account (no sync) |
+| Data | `data/tableau.sqlite` on this computer | per account: synced through Supabase when configured, otherwise this browser's localStorage |
 
 Both run the same dashboard code. Move data between them with **Settings → Backup** (download, then restore with a preview).
 
@@ -74,7 +74,7 @@ Copying the whole `data/` folder (with the app stopped) is also a full backup.
 npm test
 ```
 
-Two suites. `test/local-backend.test.js` runs the web version's storage layer: accounts are isolated, data persists, a localhost backup imports with the same ids, and two tabs don't overwrite each other. `test/flows.test.js` starts a real server on a temporary database and checks: no duplicate tasks; focus sessions saved to the second and shared by Today and Stats, 1-day durations, the "Other" category; a 5th Pinterest account (tomorrow 25, today unchanged at 15/20); logging / undoing Pins, articles and a video cross-posted to FB+IG stays in sync across Today, Stats and a challenge; the timer (pause, restart, extend, finish, expiry); a one-week coding Off; an undated project and its milestones; backup then restore into a fresh instance.
+Three suites. `test/cloud-sync.test.js` covers cloud sync: two devices of one account, offline edits kept and sent later, retries that never write twice, conflicts that never overwrite silently, and a backup import with preview, no duplicates and pre-sync browser data left untouched. `test/local-backend.test.js` runs the web version's storage layer: accounts are isolated, data persists, a localhost backup imports with the same ids, and two tabs don't overwrite each other. `test/flows.test.js` starts a real server on a temporary database and checks: no duplicate tasks; focus sessions saved to the second and shared by Today and Stats, 1-day durations, the "Other" category; a 5th Pinterest account (tomorrow 25, today unchanged at 15/20); logging / undoing Pins, articles and a video cross-posted to FB+IG stays in sync across Today, Stats and a challenge; the timer (pause, restart, extend, finish, expiry); a one-week coding Off; an undated project and its milestones; backup then restore into a fresh instance.
 
 ## Scoring rules
 

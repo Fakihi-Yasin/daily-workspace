@@ -450,7 +450,9 @@ test('11. unfinished one-off tasks carry over as Overdue; completion credits onl
     assert.equal(d.todos.find(x => x.id === fix.id).done_for_day, 1);
     assert.deepEqual((await c('GET', `/api/today?date=${y}`)).count, yBefore, 'yesterday’s score not rewritten');
     const st = await c('GET', `/api/stats?from=${y}&to=${t}`);
-    assert.equal(st.daily.find(x => x.date === y).done, yBefore.done, 'Stats: yesterday unchanged');
+    // Yesterday was never opened in the app (its tasks were added afterwards): no score is invented for it.
+    assert.equal(st.daily.find(x => x.date === y).overall, null, 'Stats: a day never set up has no score recorded');
+    assert.equal((await c('GET', `/api/today?date=${y}`)).dayScore.pct, null);
     assert.equal(st.daily.find(x => x.date === t).done, d.count.done, 'Stats: today credited');
 
     // Stays until done or deleted; never shows on a future day; doesn't come back once done.

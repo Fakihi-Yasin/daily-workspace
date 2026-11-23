@@ -32,6 +32,29 @@ if (provider === 'auth0') {
   config.clientId = clientId;
 }
 
+// Optional cloud sync (Supabase). Without these variables the build keeps the browser-only storage.
+// Only the PUBLISHABLE key may be used here: it ends up in the JavaScript sent to every visitor.
+const sbUrl = (process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+const sbKey = (process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
+const audience = (process.env.AUTH0_AUDIENCE || '').trim();
+if (sbUrl || sbKey) {
+  if (!sbUrl || !sbKey) fail('set both SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY (or neither, for browser-only storage).');
+  const localTest = provider === 'test' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(sbUrl); // fake sync server, test builds only
+  if (!localTest && !/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(sbUrl)) fail('SUPABASE_URL should look like https://<project-ref>.supabase.co');
+  if (/^sb_secret_/i.test(sbKey) || /service_role/i.test(jwtRole(sbKey))) {
+    fail('SUPABASE_PUBLISHABLE_KEY is a SECRET / service_role key. Never put it in the frontend: use the publishable key (sb_publishable_…), and rotate the secret key if it was exposed.');
+  }
+  if (!/^sb_publishable_[A-Za-z0-9_-]+$/.test(sbKey) && jwtRole(sbKey) !== 'anon') fail('SUPABASE_PUBLISHABLE_KEY should be the publishable key (sb_publishable_…).');
+  if (provider === 'auth0' && !audience) fail('AUTH0_AUDIENCE must be set with Supabase sync (the identifier of the Auth0 API whose tokens Supabase accepts, see DEPLOY.md).');
+  config.supabase = { url: sbUrl, publishableKey: sbKey };
+  if (audience) config.audience = audience;
+}
+function jwtRole(k) {
+  const parts = k.split('.');
+  if (parts.length !== 3) return '';
+  try { return String(JSON.parse(Buffer.from(parts[1], 'base64url').toString()).role || ''); } catch { return ''; }
+}
+
 fs.rmSync(outdir, { recursive: true, force: true });
 fs.mkdirSync(path.join(outdir, 'assets', 'fonts'), { recursive: true });
 
@@ -72,13 +95,14 @@ try { var t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') 
 `);
 
 const authOrigin = provider === 'auth0' ? `https://${config.domain}` : '';
+const syncOrigin = config.supabase ? config.supabase.url : '';
 const csp = [
   "default-src 'self'",
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
   "img-src 'self' data:",
-  `connect-src 'self' ${authOrigin}`.trim(),
+  `connect-src 'self' ${authOrigin} ${syncOrigin}`.replace(/\s+/g, ' ').trim(),
   `frame-src ${authOrigin || "'none'"}`,
   "object-src 'none'",
   "base-uri 'self'",
@@ -107,4 +131,4 @@ fs.writeFileSync(path.join(outdir, 'index.html'), `<!doctype html>
 fs.writeFileSync(path.join(outdir, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
 
 const size = fs.statSync(path.join(outdir, 'assets', 'app.js')).size;
-console.log(`✔ Built ${path.relative(ROOT, outdir)}/ (auth: ${provider}${config.domain ? ' @ ' + config.domain : ''}, app.js ${(size / 1024).toFixed(0)} KB)`);
+console.log(`✔ Built ${path.relative(ROOT, outdir)}/ (auth: ${provider}${config.domain ? ' @ ' + config.domain : ''}, storage: ${config.supabase ? 'Supabase sync @ ' + config.supabase.url : 'browser only'}, app.js ${(size / 1024).toFixed(0)} KB)`);

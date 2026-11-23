@@ -64,6 +64,8 @@ export function downloadJson(data, filename) {
 }
 // Where data lives, for user-facing notes.
 export const isBrowserStorage = () => !!(window.__dash && window.__dash.storageKind === 'browser');
+export const isCloudStorage = () => !!(window.__dash && window.__dash.storageKind === 'cloud');
+export const CLOUD_NOTE = 'Data is saved to your account in the cloud and synced across the devices where you sign in. This browser keeps a copy for offline use.';
 export const BROWSER_NOTE = 'Data is stored in this browser. Export a backup before changing browsers or clearing site data.';
 
 // ---------- toasts ----------
@@ -168,6 +170,8 @@ const ICONS = {
   calendar: 'M4 5h16v15H4zM4 9h16M8 3v4M16 3v4',
   sun: 'M12 16a4 4 0 100-8 4 4 0 000 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   monitor: 'M3 4h18v12H3zM8 20h8M12 16v4',
+  list: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01', ban: 'M12 21a9 9 0 100-18 9 9 0 000 18zM5.6 5.6l12.8 12.8',
+  history: 'M3 12a9 9 0 103-6.7L3 8M3 3v5h5M12 7v5l3 2',
   logout: 'M15 4h4v16h-4M10 17l5-5-5-5M15 12H3', clock: 'M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 2', note: 'M5 4h14v16H5zM9 9h6M9 13h6',
 };
 export const Icon = ({ name, size = 18 }) => html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${ICONS[name] || ''} /></svg>`;
@@ -177,7 +181,7 @@ export function Bar({ value, color = 'blue', label, thin }) {
   return html`<div class=${'bar ' + (thin ? 'thin ' : '') + color} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${Math.round(v)} aria-label=${label || 'Progress'}><span style=${{ width: v + '%' }}></span></div>`;
 }
 
-export function Ring({ value, size = 64, stroke = 7, color = 'var(--blue)', children }) {
+export function Ring({ value, size = 64, stroke = 7, color = 'var(--accent)', children }) {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r;
   const v = value == null ? 0 : Math.max(0, Math.min(100, value));
   return html`<div class="ring" style=${{ width: size + 'px', height: size + 'px' }}>
@@ -209,6 +213,49 @@ export function Modal({ title, onClose, children, wide }) {
       <div class="modal-body">${children}</div>
     </div>
   </div>`;
+}
+
+// A textarea that grows with its content (long and multiline titles stay fully readable while editing).
+// Enter saves, Shift+Enter inserts a new line, Escape cancels. With `bullets`, typing "- " at the start
+// of a line turns it into a "• " bullet. Line breaks and bullets are formatting inside ONE text.
+export const BULLET = '• ';
+const toBullets = (v) => v.replace(/(^|\n)- /g, '$1' + BULLET);
+export function AutoGrow({ value, onInput, onSave, onCancel, label, autofocus = true, placeholder, maxlength = 1000, bullets = true, id, enterkeyhint }) {
+  const ref = useRef();
+  const fit = () => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 2 + 'px'; } };
+  useEffect(() => { fit(); if (autofocus && ref.current) { ref.current.focus(); const n = ref.current.value.length; ref.current.setSelectionRange(n, n); } }, []);
+  useEffect(fit, [value]);
+  const input = (e) => {
+    const el = e.target;
+    let v = el.value;
+    if (bullets) {
+      const b = toBullets(v);
+      if (b !== v) { const a = el.selectionStart, z = el.selectionEnd; el.value = b; el.setSelectionRange(a, z); v = b; } // same length: caret stays put
+    }
+    onInput(v); fit();
+  };
+  return html`<textarea ref=${ref} id=${id} class="autogrow" rows="1" value=${value} aria-label=${label} placeholder=${placeholder} maxlength=${maxlength} enterkeyhint=${enterkeyhint}
+    onInput=${input}
+    onKeyDown=${(e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && onSave) { e.preventDefault(); onSave(); }
+      if (e.key === 'Escape' && onCancel) { e.preventDefault(); onCancel(); }
+    }} />`;
+}
+
+// A task's text: line breaks kept; lines starting with "• " (or "- ") shown as a bulleted list.
+export const firstLine = (s) => { const l = String(s || '').split('\n')[0].replace(/^(• |- )/, ''); return String(s || '').includes('\n') ? l + ' …' : l; };
+export function TaskText({ text }) {
+  const lines = String(text || '').split('\n');
+  if (lines.length === 1 && !/^(• |- )/.test(lines[0])) return text;
+  const out = [];
+  for (const line of lines) {
+    const m = /^(• |- )(.*)$/.exec(line);
+    if (m) { const last = out[out.length - 1]; if (last && last.list) last.items.push(m[2]); else out.push({ list: true, items: [m[2]] }); }
+    else out.push({ line });
+  }
+  return html`<span class="task-text">${out.map(b => b.list
+    ? html`<ul class="task-bullets">${b.items.map(i => html`<li>${i}</li>`)}</ul>`
+    : html`<span class="task-line">${b.line || '\u00a0'}</span>`)}</span>`;
 }
 
 // Choose when an edit takes effect.

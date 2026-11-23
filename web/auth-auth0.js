@@ -3,11 +3,13 @@
 // Invite-only access is enforced in Auth0 (sign-ups disabled on the database connection).
 import { createAuth0Client } from '@auth0/auth0-spa-js';
 
-export async function createAuth({ domain, clientId }) {
+// With cloud sync, `audience` is the Auth0 API whose access tokens Supabase accepts (Third-Party Auth);
+// the user id stays the same Auth0 `sub`, so existing accounts keep their identity.
+export async function createAuth({ domain, clientId, audience }) {
   const client = await createAuth0Client({
     domain,
     clientId,
-    authorizationParams: { redirect_uri: window.location.origin + '/' },
+    authorizationParams: { redirect_uri: window.location.origin + '/', ...(audience ? { audience } : {}) },
     // Keeps the session across reloads without third-party cookies. Holds tokens only — no dashboard data.
     cacheLocation: 'localstorage',
     useRefreshTokens: true,
@@ -37,6 +39,15 @@ export async function createAuth({ domain, clientId }) {
     error,
     user: u && u.sub ? { id: u.sub, email: u.email || '', name: u.name || u.email || '' } : null,
     login: () => client.loginWithRedirect({ appState: { hash: window.location.hash } }),
+    // Access token for the sync API. Errors (expired session, missing consent…) are tagged `auth`.
+    getToken: async () => {
+      try {
+        return await client.getTokenSilently(audience ? { authorizationParams: { audience } } : undefined);
+      } catch (e) {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) throw Object.assign(new Error('Offline'), { offline: true });
+        throw Object.assign(new Error(e.error_description || e.message || 'Sign-in expired'), { auth: true });
+      }
+    },
     logout: () => client.logout({ logoutParams: { returnTo: window.location.origin + '/' } }),
   };
 }
