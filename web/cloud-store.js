@@ -26,19 +26,58 @@ export const newRev = () => `${Date.now().toString(36)}-${(globalThis.crypto && 
 
 // Thin PostgREST client. `getToken` returns the Auth0 access token (Supabase Third-Party Auth).
 export function createSupabaseRemote({ url, publishableKey, getToken, fetchImpl = globalThis.fetch.bind(globalThis) }) {
+  // Temporary diagnostics for the cloud-sync branch Preview, enabled explicitly by URL.
+  const diagnostics = typeof window !== 'undefined'
+    && window.location.hostname === 'daily-workspace-git-cloud-sync-fakihiyassin01-9610s-projects.vercel.app'
+    && new URLSearchParams(window.location.search).get('sync-debug') === '1';
+  const report = (stage, details = {}) => {
+    if (diagnostics) console.info('Cloud sync diagnostic: ' + JSON.stringify({ stage, ...details }));
+  };
+  const safeCode = (code) => typeof code === 'string'
+    && /^(?:PGRST[0-9]{3}|[0-9A-Z]{5}|UNAUTHORIZED(?:_[A-Z_]{1,32})?|invalid_jwt|permission_denied)$/.test(code)
+    ? code : undefined;
   const base = url.replace(/\/+$/, '') + '/rest/v1';
   async function call(path, init = {}) {
     let token;
     try { token = await getToken(); }
-    catch (e) { throw Object.assign(new Error(e.message || 'Sign-in expired'), { auth: !e.offline, offline: !!e.offline }); }
+    catch (e) {
+      report('token retrieval failed', {
+        code: /missing refresh token/i.test(e.message) ? 'missing_refresh_token' : undefined,
+        offline: !!e.offline,
+      });
+      throw Object.assign(new Error(e.message || 'Sign-in expired'), { auth: !e.offline, offline: !!e.offline });
+    }
+    if (diagnostics) {
+      try {
+        const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+        const claims = JSON.parse(atob(payload));
+        report('token retrieved', {
+          issuerMatches: claims.iss === 'https://dev-fpl2q3wyjaf17edb.us.auth0.com/',
+          audienceMatches: [claims.aud].flat().includes('https://daily-workspace-sync'),
+          roleMatches: claims.role === 'authenticated',
+          rolePresent: Object.hasOwn(claims, 'role'),
+        });
+      } catch {
+        report('token retrieved without readable JWT claims');
+      }
+    }
     let res;
+    report('sending Supabase request');
     try {
       res = await fetchImpl(base + path, { ...init, headers: { apikey: publishableKey, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) } });
     } catch (e) {
+      report('Supabase request failed before an HTTP response');
       throw Object.assign(new Error('No connection to the sync server'), { offline: true });
     }
     const text = await res.text();
-    const body = text ? JSON.parse(text) : null;
+    let body;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch (error) {
+      report('Supabase response could not be parsed', { status: res.status });
+      throw error;
+    }
+    report('Supabase response received', { status: res.status, code: safeCode(body?.code ?? body?.error_code) });
     if (!res.ok) {
       const msg = (body && (body.message || body.msg || body.error)) || `HTTP ${res.status}`;
       throw Object.assign(new Error(`Sync server: ${msg}`), { status: res.status, auth: res.status === 401 || /jwt|token/i.test(msg) });
