@@ -602,7 +602,9 @@ dl.kv dd { margin: 0; overflow-wrap: anywhere; }
 .sync-banner.offline { border-color: transparent; }
 
 /* ---------- v3: long titles, editor, subtasks, cancelled ---------- */
-html, body { overflow-x: hidden; }
+/* Prevent sideways page scroll without breaking the pinned sidebar: overflow "hidden" on html+body made
+   body its own scroll container, so the sticky sidebar scrolled away with the page. "clip" doesn't. */
+body { overflow-x: clip; }
 main { min-width: 0; }
 .tname, .todo-title, .sub-title, .done-title, .wrap-anywhere, .what, .sc-head h4 { overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
 .todo-title { display: block; white-space: pre-wrap; }
@@ -704,3 +706,9 @@ textarea.autogrow { display: block; width: 100%; min-height: 40px; resize: none;
 main { padding-bottom: 32px; }
 @media (max-width: 1100px) { main { padding-bottom: 28px; } }
 @media (max-width: 720px) { main { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); } }
+
+/* Desktop sidebar: pinned to the viewport at full height; on short windows its own content scrolls so
+   the theme, demo and account controls stay reachable. (Mobile keeps the fixed bottom bar.) */
+@media (min-width: 721px) {
+  .side { position: sticky; top: 0; height: 100vh; height: 100dvh; align-self: start; overflow-y: auto; overscroll-behavior: contain; }
+}
