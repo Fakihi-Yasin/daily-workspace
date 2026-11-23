@@ -1,5 +1,5 @@
 // Settings: accounts & sites, routines (versioned with effective dates), categories, timezone, backup, demo.
-import { html, useState, useEffect, useRef, useResource, api, act, bus, toast, Icon, useTheme, THEMES, downloadJson, isBrowserStorage, BROWSER_NOTE, Chip, Modal, EffectPicker, Empty, fmtDay, fmtShort, addDays,
+import { html, useState, useEffect, useRef, useResource, api, act, bus, toast, Icon, useTheme, THEMES, downloadJson, isBrowserStorage, isCloudStorage, BROWSER_NOTE, CLOUD_NOTE, Chip, Modal, EffectPicker, Empty, fmtDay, fmtShort, addDays,
   KIND_LABELS, KIND_PLURAL, KIND_COLOR, DAYS, DAY_NAMES } from './lib.js';
 
 const TABS = [['assets', 'Accounts & sites'], ['routines', 'Routines'], ['categories', 'Categories'], ['general', 'General'], ['backup', 'Backup'], ['demo', 'Demo']];
@@ -412,12 +412,14 @@ function General({ data }) {
 
 // ---------- Backup ----------
 function StorageNote() {
+  if (isCloudStorage()) return html`<p class="notice blue" role="note">${CLOUD_NOTE}</p>`;
   return isBrowserStorage()
     ? html`<p class="notice" role="note"><strong>${BROWSER_NOTE}</strong></p>`
     : html`<p class="notice blue" role="note">Data is stored on this computer in <code>data/tableau.sqlite</code>.</p>`;
 }
 
 function AccountCard() {
+  if (isCloudStorage()) return html`<${CloudAccountCard} />`;
   if (!isBrowserStorage()) return null;
   const d = window.__dash;
   const kb = Math.round(d.bytesUsed() / 1024);
@@ -428,6 +430,23 @@ function AccountCard() {
     <p class="hint">No cross-device sync yet. This browser holds about ${kb} KB of dashboard data for this account (browsers allow roughly 5 MB per site).
       Other accounts' data in this browser is never shown here, but anyone using this browser profile can read site storage — don't keep passwords or other sensitive information in the dashboard.</p>
     <div><button class="btn" onClick=${() => d.logout()}>Sign out</button></div>
+  </section>`;
+}
+
+function CloudAccountCard() {
+  const d = window.__dash;
+  const [s, set] = useState(d.sync.status());
+  useEffect(() => d.sync.subscribe(() => set(d.sync.status())), []);
+  const label = { synced: s.pending ? 'Saving…' : 'Synced', saving: 'Saving…', idle: 'Saving…', offline: 'Offline', error: 'Sync failed', signin: 'Sign in again to sync', conflict: 'Conflict — choose a version (banner at the top)' }[s.state] || s.state;
+  return html`<section class="card stack" aria-label="Account and sync">
+    <h3>Account & sync</h3>
+    <p>Signed in as <strong>${d.user.email || d.user.name}</strong>.</p>
+    <p class="notice blue">${CLOUD_NOTE}</p>
+    <p>Sync: <${Chip} color=${['offline', 'error', 'signin', 'conflict'].includes(s.state) ? 'pink' : 'mint'}>${label}</${Chip}>
+      ${s.lastSync && html` <span class="hint">last synced ${new Date(s.lastSync).toLocaleString('en-GB')}</span>`}</p>
+    ${s.error && html`<p class="notice" role="alert">${s.error}</p>`}
+    ${s.pending && html`<p class="hint">Changes not yet in the cloud are kept in this browser until they are sent.</p>`}
+    <div class="row wrap"><button class="btn" onClick=${() => d.sync.retry()}>Sync now</button><button class="btn" onClick=${() => d.logout()}>Sign out</button></div>
   </section>`;
 }
 
@@ -455,6 +474,12 @@ function Backup() {
     try {
       const r = await act('POST', '/api/restore/apply', { token: preview.token });
       toast({ msg: 'Data restored. Previous data saved as ' + String(r.safety_backup || '').split('/').pop() });
+      if (isCloudStorage()) {
+        await window.__dash.sync.retry();
+        const st = window.__dash.sync.status();
+        if (st.pending || st.error) toast({ msg: 'Restored on this device, but not synced yet: ' + (st.error || 'will retry') + '. Keep this tab open until it shows “Synced”.', kind: 'error' });
+        else toast({ msg: 'Restored and synced to your account' });
+      }
       setPreview(null);
     } finally { setBusy(false); }
   };
@@ -466,24 +491,48 @@ function Backup() {
       <h3>Back up</h3>
       <p class="muted">A single JSON file with all your data (accounts, routines, history, projects, sessions…).</p>
       <div><button class="btn primary" onClick=${download}>Download a backup</button></div>
-      ${isBrowserStorage()
+      ${isCloudStorage()
+        ? html`<p class="hint">Restoring a file (from the localhost app or this browser before sync) brings your data into your signed-in account, on all your devices.</p>`
+        : isBrowserStorage()
         ? html`<p class="hint">Restoring a file exported from the localhost app (or another browser) brings your data here, into this account only.</p>`
         : html`<p class="hint">From the command line: <code>npm run backup</code> (writes to <code>data/backups/</code>).</p>`}
     </div>
+    ${isCloudStorage() && window.__dash.legacyBackup() && html`<${LegacyImport} onPreview=${setPreview} />`}
     <div class="card stack">
       <h3>Restore</h3>
       <p class="muted">Choose a file: you will see a preview before anything is replaced.</p>
       <input type="file" accept="application/json,.json" onChange=${onFile} aria-label="Backup file" />
       ${preview && html`<div class="stack">
-        <p class="notice"><strong>Preview of ${preview.file}</strong> — exported ${new Date(preview.exported_at).toLocaleString('en-GB')}. Restoring <strong>replaces all current data</strong>. A safety copy is made just before.</p>
+        <p class="notice"><strong>Preview of ${preview.file}</strong> — exported ${new Date(preview.exported_at).toLocaleString('en-GB')}. Restoring <strong>replaces all current data${isCloudStorage() ? ' in your account, on every device' : ''}</strong>. A safety copy is ${isCloudStorage() ? 'downloaded' : 'made'} just before.</p>
         <table class="data"><thead><tr><th></th><th class="r">Current</th><th class="r">Backup</th></tr></thead><tbody>
           ${rows.map(([k, l]) => html`<tr><td>${l}</td><td class="r">${preview.current[k]}</td><td class="r"><strong>${preview.incoming[k]}</strong></td></tr>`)}
           <tr><td>Period</td><td class="r">${preview.current.first_date || '—'} → ${preview.current.last_date || '—'}</td><td class="r">${preview.incoming.first_date || '—'} → ${preview.incoming.last_date || '—'}</td></tr>
         </tbody></table>
+        ${preview.already_imported && html`<p class="notice blue">This exact data was already imported on ${new Date(preview.already_imported).toLocaleString('en-GB')}. Importing it again creates no duplicates: it replaces your data with the same records (unless you changed things since).</p>`}
         ${preview.incoming.asset_names.length > 0 && html`<p class="small muted">Accounts in the backup: ${preview.incoming.asset_names.join(', ')}</p>`}
-        <div class="form-actions"><button class="btn" onClick=${() => setPreview(null)}>Cancel</button><button class="btn dark" disabled=${busy} onClick=${apply}>Replace my data</button></div>
+        <div class="form-actions"><button class="btn" onClick=${() => setPreview(null)}>Cancel</button><button class="btn dark" disabled=${busy} onClick=${apply}>${isCloudStorage() ? 'Replace my account data' : 'Replace my data'}</button></div>
       </div>`}
     </div>
+  </div>`;
+}
+
+// Dashboard data this browser stored before cloud sync existed: importable with the same preview.
+function LegacyImport({ onPreview }) {
+  const data = window.__dash.legacyBackup();
+  const [busy, setBusy] = useState(false);
+  const n = (t) => (data.tables[t] || []).length;
+  const open = async () => {
+    setBusy(true);
+    try { onPreview({ ...(await api('POST', '/api/restore/preview', data)), file: 'data saved in this browser before sync' }); }
+    catch (e) { toast({ msg: e.message, kind: 'error' }); }
+    finally { setBusy(false); }
+  };
+  return html`<div class="card stack">
+    <h3>Data from this browser (before sync)</h3>
+    <p class="muted">This browser still holds dashboard data saved for your account before cloud sync: ${n('projects')} projects, ${n('tasks')} tasks, ${n('sessions')} sessions${data.exported_at ? `, last saved ${new Date(data.exported_at).toLocaleString('en-GB')}` : ''}.
+      It is kept untouched. You can import it into your account — you'll see a preview first.</p>
+    <div><button class="btn" disabled=${busy} onClick=${open}>Preview import</button>
+      <button class="btn ghost" onClick=${() => downloadJson(data, `dashboard-browser-before-sync-${new Date().toISOString().slice(0, 10)}.json`)}>Download it as a file</button></div>
   </div>`;
 }
 
@@ -495,7 +544,7 @@ function Demo() {
   const switchTo = async (mode) => { await api('POST', '/api/mode', { mode }); bus.emit(); toast({ msg: mode === 'demo' ? 'Demo mode on' : 'Back to your data' }); };
   return html`<div class="card stack" style="max-width:640px">
     <h3>Demo data</h3>
-    <p class="muted">The demo uses a <strong>separate ${isBrowserStorage() ? 'storage slot for your account in this browser' : html`database (<code>data/demo.sqlite</code>)`}</strong>. Your real data is never mixed or modified.</p>
+    <p class="muted">The demo uses a <strong>separate ${isBrowserStorage() || isCloudStorage() ? 'storage slot for your account in this browser' : html`database (<code>data/demo.sqlite</code>)`}</strong>. Your real data is never mixed or modified.</p>
     <p>Current mode: <${Chip} color=${demo ? 'yellow' : 'mint'}>${demo ? 'Demo' : 'My data'}</${Chip}></p>
     <div class="row wrap">
       ${demo ? html`<button class="btn primary" onClick=${() => switchTo('real')}>Back to my data</button>

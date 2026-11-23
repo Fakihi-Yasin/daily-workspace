@@ -569,3 +569,13 @@ dl.kv dd { margin: 0; overflow-wrap: anywhere; }
 .add-task-row input { flex: 1; min-width: 0; min-height: 40px; background: var(--card); }
 .add-task-row .btn { min-height: 40px; padding: 0 14px; flex: none; }
 @media (max-width: 720px) { .add-task-row input { font-size: 16px; } }
+
+/* Cloud sync status */
+.sync-badge { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 8px; font-size: 12px; font-weight: 600; color: #c9cbd3; text-decoration: none; background: rgba(255, 255, 255, .06); }
+.sync-badge i { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); flex: none; }
+.sync-badge.bad { color: #fff; background: rgba(196, 40, 45, .35); }
+.sync-badge.bad i { background: #ff6e73; }
+@media (max-width: 1100px) { .sync-badge { justify-content: center; } .sync-badge span { display: none; } }
+.sync-banner { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; margin: 0 0 16px; padding: 12px 16px; border-radius: 12px; background: var(--yellow-soft); border: 1px solid var(--danger); font-size: 13.5px; }
+.sync-banner p { margin: 0; flex: 1 1 380px; }
+.sync-banner.offline { border-color: transparent; }

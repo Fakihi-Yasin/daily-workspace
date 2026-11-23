@@ -68,9 +68,67 @@ AUTH0_DOMAIN=your-tenant.eu.auth0.com AUTH0_CLIENT_ID=xxxx npm run build
 npm run preview          # → http://localhost:4322 (this URL is in the Auth0 allow-lists above)
 ```
 
-## Later: moving to Supabase
+## Cloud sync with Supabase (V2)
 
-- **Engine:** the dashboard talks to storage only through `web/storage.js` (`load`, `save`, `revision`, `remove`, prefs).
-- **Supabase adapter:** a Supabase version would implement the same methods against a `snapshots` table (`user_id`, `slot`, `snapshot jsonb`, `rev`), protected by row-level security (`user_id = auth.uid()`).
-- **Fine-grained alternative:** import the per-table rows using the versioned backup format.
-- **IDs:** record ids, and the `dataset_id` of every dataset, are preserved through export/import, so links between records survive the move.
+With three extra environment variables, the same build syncs each account's dashboard across devices
+through Supabase. Without them it stays browser-only (V1), so the switch is per Vercel environment.
+
+### How it works
+- **Sign-in is unchanged:** Auth0 stays the login. Supabase **Third-Party Auth** trusts the Auth0
+  tenant, and the database identifies you by the Auth0 user id (`sub`), the same id that V1 already
+  used. No passwords are moved and no accounts are migrated.
+- **Data:** one row per account in `public.snapshots` (migration in `supabase/migrations/`). Grants and
+  row-level security mean signed-out visitors have no access, and a signed-in user can only read and
+  write the row whose `user_id` is their own token's `sub`.
+- **Sync:** every change is written to this browser first and marked pending, then sent to Supabase.
+  The write is a compare-and-swap, so a device never overwrites a newer cloud version. Retries reuse
+  the same revision id, so a retry never writes twice. If two devices both edited while one was
+  offline, a banner asks which version to keep, and the other version is downloaded as a file first.
+  Pending changes survive reloads, closed tabs and expired sessions.
+- **No server:** the browser talks to Supabase's REST API with the **publishable** key and the
+  user's Auth0 access token. The build refuses a secret or service_role key.
+- **Existing browser data** (V1, `dash.v1.*` in localStorage) is never moved, changed or deleted. Import
+  it, or any JSON backup, from **Settings → Backup**. You get a preview and must confirm with **Replace my
+  account data**. Your current account data is downloaded first. An import replaces data with the
+  same record ids, so importing the same file twice never creates duplicates, and the preview tells
+  you when that exact file was already imported.
+
+### Environment variables (Vercel → Settings → Environment Variables)
+
+| Name | Value | Environments |
+|---|---|---|
+| `AUTH0_DOMAIN` | unchanged | Production, Preview |
+| `AUTH0_CLIENT_ID` | unchanged | Production, Preview |
+| `AUTH0_AUDIENCE` | the Auth0 API identifier, e.g. `https://daily-workspace-sync` | Preview first; Production when you go live |
+| `SUPABASE_URL` | `https://<project-ref>.supabase.co` | Preview first; Production when you go live |
+| `SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_…` (Supabase → Project Settings → API Keys) | Preview first; Production when you go live |
+
+The database password and the `sb_secret_…` / service_role key are not used anywhere. Don't add them.
+
+### Setup
+1. **Auth0 → Applications → APIs → Create API:** name `Daily Workspace sync`, identifier
+   `https://daily-workspace-sync` (this is `AUTH0_AUDIENCE`), signing algorithm **RS256**. Under its
+   **Application Access**, allow the Dashboard SPA (user access).
+2. **Auth0 → Actions → Library → Create Action → Login / Post Login**, named `supabase-role`:
+   ```js
+   exports.onExecutePostLogin = async (event, api) => {
+     // Supabase Third-Party Auth maps this claim to the Postgres role used by row-level security.
+     api.accessToken.setCustomClaim('role', 'authenticated');
+   };
+   ```
+   Deploy it and drag it into **Actions → Triggers → post-login**. It only adds a claim to access
+   tokens. Logins, users and user ids don't change.
+3. **Supabase → Authentication → Sign In / Providers → Third-Party Auth → Add provider → Auth0**:
+   enter the tenant ID and region (from `AUTH0_DOMAIN`: `my-tenant.eu.auth0.com` means tenant
+   `my-tenant`, region `eu`).
+4. **Supabase → SQL Editor:** run `supabase/migrations/20261123000000_cloud_snapshots.sql`, or use
+   `supabase db push` with the Supabase CLI. Check that **Database → Tables → snapshots** shows RLS enabled.
+5. **Supabase → Integrations → Data API:** keep it enabled, with `public` among the exposed schemas.
+6. **Preview sign-in:** add the preview's fixed branch URL to the Auth0 application's Allowed Callback
+   URLs, Allowed Logout URLs (with a trailing `/`) and Allowed Web Origins (without the `/`). Remove it after the review.
+7. **Check access:** run `npm run check:rls` with `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`, plus
+   `TOKEN_A` / `TOKEN_B` (access tokens of two **test** accounts) for the cross-account checks.
+
+### Storage interface
+The engine only talks to storage through `web/storage.js` (browser-only) or `web/cloud-store.js`
+(sync), which share the same methods: `load`, `save`, `revision`, `remove`, prefs.

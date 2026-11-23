@@ -64,6 +64,8 @@ export function downloadJson(data, filename) {
 }
 // Where data lives, for user-facing notes.
 export const isBrowserStorage = () => !!(window.__dash && window.__dash.storageKind === 'browser');
+export const isCloudStorage = () => !!(window.__dash && window.__dash.storageKind === 'cloud');
+export const CLOUD_NOTE = 'Data is saved to your account in the cloud and synced across the devices where you sign in. This browser keeps a copy for offline use.';
 export const BROWSER_NOTE = 'Data is stored in this browser. Export a backup before changing browsers or clearing site data.';
 
 // ---------- toasts ----------

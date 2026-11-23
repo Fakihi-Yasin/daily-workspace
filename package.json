@@ -14,7 +14,8 @@
     "build": "node scripts/build.js",
     "build:test": "AUTH_PROVIDER=test node scripts/build.js",
     "preview": "node scripts/preview.js dist 4322",
-    "test": "node --test test/flows.test.js test/local-backend.test.js"
+    "test": "node --test test/flows.test.js test/local-backend.test.js test/cloud-sync.test.js",
+    "check:rls": "node scripts/check-rls.mjs"
   },
   "devDependencies": {
     "@auth0/auth0-spa-js": "2.1.3",

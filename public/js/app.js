@@ -40,10 +40,11 @@ function App() {
         <${MiniTimer} />
         <${ThemeToggle} />
         ${modeData && modeData.mode === 'demo' && html`<a class="demo-flag" href="#/settings" title="Demo mode">D<span>EMO — sample data</span></a>`}
+        ${window.__dash && window.__dash.sync && html`<${SyncBadge} />`}
         ${window.__dash && html`<${Account} />`}
       </div>
     </nav>
-    <main id="main"><${Page} key=${r[0]} /></main>
+    <main id="main">${window.__dash && window.__dash.sync && html`<${SyncBanner} />`}<${Page} key=${r[0]} /></main>
     <${Toasts} />
   </div>`;
 }
@@ -54,6 +55,49 @@ function Account() {
     <span class="account-id" title=${u.email}>${u.email || u.name}</span>
     <button class="account-out" onClick=${() => window.__dash.logout()} title="Sign out" aria-label="Sign out"><${Icon} name="logout" size=${16} /><span>Sign out</span></button>
   </div>`;
+}
+
+// ---------- cloud sync status (browser build with Supabase) ----------
+export function useSync() {
+  const sync = window.__dash && window.__dash.sync;
+  const [s, set] = useState(sync ? sync.status() : null);
+  useEffect(() => (sync ? sync.subscribe(() => set(sync.status())) : undefined), []);
+  return [s, sync];
+}
+const SYNC_LABEL = { idle: 'Saving…', saving: 'Saving…', synced: 'Synced', offline: 'Offline', error: 'Sync failed', signin: 'Sign in to sync', conflict: 'Sync conflict' };
+
+function SyncBadge() {
+  const [s] = useSync();
+  if (!s) return null;
+  const bad = ['offline', 'error', 'signin', 'conflict'].includes(s.state);
+  const label = s.state === 'synced' && s.pending ? 'Saving…' : SYNC_LABEL[s.state] || s.state;
+  return html`<a class=${'sync-badge' + (bad ? ' bad' : '')} href="#/settings?tab=backup" role="status" aria-live="polite"
+    title=${s.error || (s.lastSync ? 'Last synced ' + new Date(s.lastSync).toLocaleTimeString() : label)}>
+    <i aria-hidden="true"></i><span>${label}${bad && s.pending ? ' · changes kept here' : ''}</span></a>`;
+}
+
+function SyncBanner() {
+  const [s, sync] = useSync();
+  const [busy, setBusy] = useState(false);
+  if (!s || !['offline', 'error', 'signin', 'conflict'].includes(s.state)) return null;
+  const run = (fn) => async () => { setBusy(true); try { await fn(); } catch (e) { alert(e.message || e); } finally { setBusy(false); } };
+  if (s.state === 'conflict') {
+    return html`<div class="sync-banner conflict" role="alert">
+      <p><strong>Sync paused: this dashboard changed on another device while this one had unsynced changes.</strong>
+        Nothing has been overwritten. Choose which version to keep — the other one is downloaded as a backup file first, so you can restore it from Settings → Backup.</p>
+      <div class="row wrap">
+        <button class="btn sm dark" disabled=${busy} onClick=${run(sync.keepCloud)}>Use the cloud version</button>
+        <button class="btn sm" disabled=${busy} onClick=${run(() => { if (confirm('Replace the cloud version with this device’s version? The cloud version is downloaded as a file first.')) return sync.keepDevice(); })}>Keep this device’s version</button>
+      </div></div>`;
+  }
+  return html`<div class=${'sync-banner ' + s.state} role="alert">
+    <p><strong>${s.state === 'offline' ? 'Offline.' : s.state === 'signin' ? 'Sync needs you to sign in again.' : 'Sync failed.'}</strong>
+      ${' '}${s.state === 'error' ? s.error + '. ' : ''}${s.pending ? 'Your latest changes are saved in this browser and will be sent when sync works again — don’t clear this browser’s data.' : 'Your data is up to date on this device.'}</p>
+    <div class="row wrap">
+      ${s.state === 'signin'
+        ? html`<button class="btn sm dark" onClick=${() => sync.signInAgain()}>Sign in again</button>`
+        : html`<button class="btn sm" disabled=${busy} onClick=${run(sync.retry)}>Retry now</button>`}
+    </div></div>`;
 }
 
 export function mount(el) {
