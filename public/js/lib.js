@@ -170,6 +170,8 @@ const ICONS = {
   calendar: 'M4 5h16v15H4zM4 9h16M8 3v4M16 3v4',
   sun: 'M12 16a4 4 0 100-8 4 4 0 000 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   monitor: 'M3 4h18v12H3zM8 20h8M12 16v4',
+  list: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01', ban: 'M12 21a9 9 0 100-18 9 9 0 000 18zM5.6 5.6l12.8 12.8',
+  history: 'M3 12a9 9 0 103-6.7L3 8M3 3v5h5M12 7v5l3 2',
   logout: 'M15 4h4v16h-4M10 17l5-5-5-5M15 12H3', clock: 'M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 2', note: 'M5 4h14v16H5zM9 9h6M9 13h6',
 };
 export const Icon = ({ name, size = 18 }) => html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${ICONS[name] || ''} /></svg>`;
@@ -179,7 +181,7 @@ export function Bar({ value, color = 'blue', label, thin }) {
   return html`<div class=${'bar ' + (thin ? 'thin ' : '') + color} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${Math.round(v)} aria-label=${label || 'Progress'}><span style=${{ width: v + '%' }}></span></div>`;
 }
 
-export function Ring({ value, size = 64, stroke = 7, color = 'var(--blue)', children }) {
+export function Ring({ value, size = 64, stroke = 7, color = 'var(--accent)', children }) {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r;
   const v = value == null ? 0 : Math.max(0, Math.min(100, value));
   return html`<div class="ring" style=${{ width: size + 'px', height: size + 'px' }}>
@@ -211,6 +213,18 @@ export function Modal({ title, onClose, children, wide }) {
       <div class="modal-body">${children}</div>
     </div>
   </div>`;
+}
+
+// A textarea that grows with its content (long titles stay fully readable while editing).
+// Enter saves (Shift+Enter is a new line), Escape cancels.
+export function AutoGrow({ value, onInput, onSave, onCancel, label, autofocus = true, placeholder, maxlength = 1000 }) {
+  const ref = useRef();
+  const fit = () => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 2 + 'px'; } };
+  useEffect(() => { fit(); if (autofocus && ref.current) { ref.current.focus(); const n = ref.current.value.length; ref.current.setSelectionRange(n, n); } }, []);
+  useEffect(fit, [value]);
+  return html`<textarea ref=${ref} class="autogrow" rows="1" value=${value} aria-label=${label} placeholder=${placeholder} maxlength=${maxlength}
+    onInput=${(e) => { onInput(e.target.value); fit(); }}
+    onKeyDown=${(e) => { if (e.key === 'Enter' && !e.shiftKey && onSave) { e.preventDefault(); onSave(); } if (e.key === 'Escape' && onCancel) { e.preventDefault(); onCancel(); } }} />`;
 }
 
 // Choose when an edit takes effect.

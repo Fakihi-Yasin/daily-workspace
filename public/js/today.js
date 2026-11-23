@@ -1,14 +1,22 @@
 // "Today": the routine checklist first, with a compact focus panel and a right column (score, next action, sessions).
-import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, fmtDay, fmtShort, addDays, fmtDur, pct } from './lib.js';
+import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, Modal, AutoGrow, fmtDay, fmtShort, addDays, fmtDur, pct } from './lib.js';
 import { FocusPanel, requestStart } from './focus.js';
+import { CompletedModal } from './history.js';
 
 const CAT_COLORS = ['blue', 'pink', 'mint', 'yellow', 'sky'];
 const catColor = (name, all) => CAT_COLORS[Math.max(0, all.indexOf(name)) % CAT_COLORS.length];
 const SETTLE_MS = 6000; // a completed row stays in place this long (undo window) before moving to "Completed"
 const isClosed = (t) => t.status === 'reported' || (t.progress.scoreTarget > 0 && t.progress.complete) || t.progress.scoreTarget === 0;
 
+// The viewed date lives in the URL (#/today?date=YYYY-MM-DD), so Stats can open a specific day.
+const dateFromHash = () => { const d = new URLSearchParams(location.hash.split('?')[1] || '').get('date'); return /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : null; };
+
 export function Today() {
-  const [date, setDate] = useState(null);
+  const [date, setDateState] = useState(dateFromHash);
+  const setDate = (d) => { setDateState(d); history.replaceState(null, '', '#/today' + (d ? '?date=' + d : '')); };
+  useEffect(() => { const f = () => setDateState(dateFromHash()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+  const [askDone, setAskDone] = useState(null); // task waiting for "Complete all subtasks" / "parent only"
+  const [showDone, setShowDone] = useState(false); // "View completed tasks" popup
   const { data, error } = useResource('/api/today' + (date ? `?date=${date}` : ''));
   const [over, setOver] = useState({}); // optimistic marks: key -> bool
   const [todoOver, setTodoOver] = useState({}); // optimistic one-off task changes: id -> { done } | { gone: true }
@@ -46,7 +54,8 @@ export function Today() {
   const cats = [...new Set(data.tasks.map(t => t.category))];
   const todos = [...data.todos.filter(t => !(todoOver[t.id] && todoOver[t.id].gone)).map(t => (todoOver[t.id] ? { ...t, ...todoOver[t.id] } : t)), ...pending];
   const overdueIds = overdueShown && overdueShown.date === data.date ? overdueShown.ids : new Set();
-  const ctx = { data, assets, over, setOver, isToday, todos, setTodoOver, setPending, overdueIds };
+  const cancelled = (data.cancelled || []).filter(t => !(todoOver[t.id] && todoOver[t.id].gone));
+  const ctx = { data, assets, over, setOver, isToday, todos, setTodoOver, setPending, overdueIds, cancelled, askDone: setAskDone };
   const count = liveCount(ctx);
   const doneIds = settled.date === data.date ? settled.ids : new Set();
   const openTasks = data.tasks.filter(t => !doneIds.has(t.id));
@@ -72,7 +81,7 @@ export function Today() {
       <div class="tg-focus"><${FocusPanel} today=${data.today} tz=${data.tz} /></div>
 
       <aside class="tg-side" aria-label="Day summary">
-        <${ScoreCard} count=${count} />
+        <${ScoreCard} count=${count} data=${data} onHistory=${() => setShowDone(true)} />
         <${NextAction} ctx=${ctx} />
         <${SessionsCard} sessions=${data.sessions} isToday=${isToday} />
       </aside>
@@ -99,6 +108,8 @@ export function Today() {
             </section>`}`}
       </div>
     </div>
+    ${askDone && html`<${DoneChoice} t=${askDone} ctx=${ctx} onClose=${() => setAskDone(null)} />`}
+    ${showDone && html`<${CompletedModal} date=${data.date} onClose=${() => setShowDone(false)} />`}
   </div>`;
 }
 
@@ -115,19 +126,31 @@ function liveCount(ctx) {
     recurring: { done: rDone, total: due.length }, custom: { done: cDone, total: ctx.todos.length }, categories: [...cats.values()] };
 }
 
-function ScoreCard({ count }) {
+// Today and upcoming days: the live count. A past day: its score as recorded that day (later deletions,
+// cancellations or moves don't rewrite it), or "No score recorded" when the day has no record.
+function ScoreCard({ count: live, data, onHistory }) {
   const [open, setOpen] = useState(false);
-  return html`<section class="card side-card" aria-label="Daily score">
+  const past = data.date < data.today;
+  const rec = data.dayScore || {};
+  const none = past && rec.pct == null;
+  const count = past && !none ? { done: rec.done, total: rec.total, pct: rec.pct, categories: rec.categories || [], custom: rec.custom || { done: 0, total: 0 } } : live;
+  const label = data.date === data.today ? 'Daily score' : `Daily score · ${fmtShort(data.date)}`;
+  return html`<section class="card side-card" aria-label=${label}>
     <div class="row">
-      <${Ring} value=${count.pct} size=${48} stroke=${6}><span style="font-size:13px">${count.pct == null ? '—' : count.pct}</span></${Ring}>
+      <${Ring} value=${none ? null : count.pct} size=${48} stroke=${6}><span style="font-size:13px">${none || count.pct == null ? '—' : count.pct}</span></${Ring}>
       <div style="flex:1;min-width:0">
-        <div class="label">Daily score</div>
-        ${count.total
+        <div class="label">${label}</div>
+        ${none
+          ? html`<div class="score-line">No score recorded</div>`
+          : count.total
           ? html`<div class="score-line" aria-live="polite"><span class="score-num">${count.done} / ${count.total}</span> <span>tasks done · <strong>${count.pct}%</strong></span></div>`
           : html`<div class="score-line">No tasks scheduled.</div>`}
       </div>
-      ${count.total > 0 && html`<button class="link-btn small" aria-expanded=${open} onClick=${() => setOpen(!open)}>${open ? 'Hide' : 'How?'}</button>`}
+      ${!none && count.total > 0 && html`<button class="link-btn small" aria-expanded=${open} onClick=${() => setOpen(!open)}>${open ? 'Hide' : 'How?'}</button>`}
     </div>
+    ${none && html`<p class="small muted" style="margin-top:6px">${data.unrecorded ? 'The dashboard wasn’t used this day, so there’s nothing to score.' : 'Nothing was recorded for this day.'}</p>`}
+    ${past && !none && rec.source === 'backfill' && html`<p class="small muted" style="margin-top:6px">Calculated from the records saved for that day.</p>`}
+    <button class="btn sm history-btn" onClick=${onHistory}><${Icon} name="history" size=${14} />View completed tasks</button>
     ${open && html`<div class="calc">
       ${count.categories.map(c => html`<div class="calc-row"><span>${c.category}</span><span class="num">${c.done}/${c.total}</span><strong class="num">${c.done === c.total ? '✓' : ''}</strong></div>`)}
       ${count.custom.total > 0 && html`<div class="calc-row"><span>My tasks</span><span class="num">${count.custom.done}/${count.custom.total}</span><strong class="num">${count.custom.done === count.custom.total ? '✓' : ''}</strong></div>`}
@@ -138,11 +161,11 @@ function ScoreCard({ count }) {
 
 // ---------- My tasks (one-off, for this date only) ----------
 // Done credits the day being viewed (normally today) — never rewrites an earlier day.
-async function setTodoDone(ctx, t, done) {
+async function setTodoDone(ctx, t, done, subtasks) {
   const on = ctx.data.date;
   ctx.setTodoOver(o => ({ ...o, [t.id]: { done: done ? 1 : 0, done_for_day: done ? 1 : 0, done_on: done ? on : null } }));
   try {
-    await api('PUT', `/api/todos/${t.id}`, { done, on });
+    await api('PUT', `/api/todos/${t.id}`, { done, on, ...(subtasks ? { subtasks } : {}) });
     bus.emit();
     toast({ msg: `${t.title} · ${done ? 'done' : 'reopened'}`, undo: async () => { await api('PUT', `/api/todos/${t.id}`, { done: !done, on }); bus.emit(); } });
   } catch (e) { ctx.setTodoOver(o => { const n = { ...o }; delete n[t.id]; return n; }); toast({ msg: e.message, kind: 'error' }); }
@@ -150,14 +173,15 @@ async function setTodoDone(ctx, t, done) {
 async function deleteTodo(ctx, t) {
   ctx.setTodoOver(o => ({ ...o, [t.id]: { gone: true } }));
   try {
-    await api('DELETE', `/api/todos/${t.id}`);
+    const r = await api('DELETE', `/api/todos/${t.id}`);
     bus.emit();
-    toast({ msg: `Deleted “${t.title}”`, undo: async () => { await api('POST', '/api/todos', { date: t.date, title: t.title, done: !!t.done, done_on: t.done_on, sort: t.sort }); bus.emit(); } });
+    toast({ msg: `Deleted “${t.title.length > 60 ? t.title.slice(0, 60) + '…' : t.title}”`, undo: async () => { await api('POST', '/api/todos/undelete', { deleted: r.deleted, subtasks: r.subtasks }); bus.emit(); } });
   } catch (e) { ctx.setTodoOver(o => { const n = { ...o }; delete n[t.id]; return n; }); toast({ msg: e.message, kind: 'error' }); }
 }
 
 function MyTasks({ ctx }) {
   const [title, setTitle] = useState('');
+  const [showCancelled, setShowCancelled] = useState(false);
   const overdue = ctx.todos.filter(t => ctx.overdueIds.has(t.id));
   const rest = ctx.todos.filter(t => !ctx.overdueIds.has(t.id));
   const done = ctx.todos.filter(t => t.done_for_day).length;
@@ -179,7 +203,7 @@ function MyTasks({ ctx }) {
     <form class="add-task-card" onSubmit=${add}>
       <label for="add-task-input" class="add-task-label">Add a task${ctx.isToday ? '' : ` for ${fmtShort(ctx.data.date)}`}</label>
       <div class="add-task-row">
-        <input id="add-task-input" type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} maxlength="200" enterkeyhint="done" autocomplete="off"
+        <input id="add-task-input" type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} maxlength="1000" enterkeyhint="done" autocomplete="off"
           placeholder=${ctx.isToday ? 'Task title, e.g. Fix DMCA' : 'Task title'} />
         <button class="btn primary" disabled=${!title.trim()}><${Icon} name="plus" size=${15} />Add task</button>
       </div>
@@ -189,6 +213,11 @@ function MyTasks({ ctx }) {
       <div class="task-list">${overdue.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>
     </div>`}
     ${rest.length > 0 && html`<div class="task-list">${rest.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>`}
+    ${ctx.cancelled.length > 0 && html`<div class="cancelled-group">
+      <button class="done-toggle" aria-expanded=${showCancelled} onClick=${() => setShowCancelled(!showCancelled)}>
+        <${Icon} name=${showCancelled ? 'down' : 'chevR'} size=${16} /><span>Cancelled</span><span class="muted">${ctx.cancelled.length}</span></button>
+      ${showCancelled && html`<div class="task-list">${ctx.cancelled.map(t => html`<${TodoRow} key=${'c' + t.id} t=${t} ctx=${ctx} />`)}</div>`}
+    </div>`}
   </section>`;
 }
 
@@ -197,52 +226,147 @@ const overdueLabel = (from, day) => {
   return n === 1 ? 'Overdue · from yesterday' : `Overdue · from ${fmtShort(from)} (${n} days)`;
 };
 
-function TodoRow({ t, ctx }) {
-  const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState(t.title);
-  const [menu, setMenu] = useState(false);
-  const ref = useRef();
+// Done with unfinished subtasks asks first: complete them all, or only the parent.
+async function requestDone(ctx, t) {
+  const open = (t.subtasks || []).filter(x => !x.done).length;
+  if (open > 0) return ctx.askDone(t);
+  return setTodoDone(ctx, t, true);
+}
+async function cancelTodo(ctx, t, cancel) {
+  ctx.setTodoOver(o => ({ ...o, [t.id]: { gone: true } }));
+  try {
+    await api('POST', `/api/todos/${t.id}/${cancel ? 'cancel' : 'reopen'}`);
+    bus.emit();
+    toast({ msg: `${t.title.length > 60 ? t.title.slice(0, 60) + '…' : t.title} · ${cancel ? 'cancelled' : 'reopened'}`,
+      undo: async () => { await api('POST', `/api/todos/${t.id}/${cancel ? 'reopen' : 'cancel'}`); bus.emit(); } });
+  } catch (e) { ctx.setTodoOver(o => { const n = { ...o }; delete n[t.id]; return n; }); toast({ msg: e.message, kind: 'error' }); }
+}
+
+function useOutside(open, setOpen, ref) {
   useEffect(() => {
-    if (!menu) return;
-    const f = (e) => { if (ref.current && !ref.current.contains(e.target)) setMenu(false); };
-    const k = (e) => { if (e.key === 'Escape') setMenu(false); };
+    if (!open) return;
+    const f = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const k = (e) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', f); document.addEventListener('keydown', k);
     return () => { document.removeEventListener('mousedown', f); document.removeEventListener('keydown', k); };
-  }, [menu]);
-  const saveTitle = async (e) => {
-    e.preventDefault();
-    if (!title.trim() || title.trim() === t.title) return setEditing(false);
+  }, [open]);
+}
+
+// Title editor: a textarea that grows with the text, with visible Save and Cancel.
+function TitleEditor({ value, onSave, onCancel, label }) {
+  const [v, setV] = useState(value);
+  const save = () => { const x = v.trim(); if (!x) return; if (x === value) return onCancel(); onSave(x); };
+  return html`<form class="title-edit" onSubmit=${(e) => { e.preventDefault(); save(); }}>
+    <${AutoGrow} value=${v} onInput=${setV} onSave=${save} onCancel=${onCancel} label=${label} />
+    <div class="title-edit-actions">
+      <button class="btn sm primary" disabled=${!v.trim()}>Save</button>
+      <button type="button" class="btn sm" onClick=${onCancel}>Cancel</button>
+    </div>
+  </form>`;
+}
+
+function TodoRow({ t, ctx }) {
+  const [editing, setEditing] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [subsOpen, setSubsOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const ref = useRef();
+  useOutside(menu, setMenu, ref);
+  const cancelled = !!t.cancelled;
+  const saveTitle = async (title) => {
     try { await api('PUT', `/api/todos/${t.id}`, { title }); bus.emit(); setEditing(false); } catch (err) { toast({ msg: err.message, kind: 'error' }); }
   };
+  const subs = t.subtasks || [];
+  const showSubs = subsOpen || adding;
   const doneAt = t.done && t.done_at ? new Date(t.done_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
-  const late = t.overdue && !t.done_for_day;
+  const late = t.overdue && !t.done_for_day && !cancelled;
   const status = t.temp ? 'Saving…'
+    : cancelled ? `Cancelled${t.cancelled_on ? ' · ' + fmtShort(t.cancelled_on) : ''}`
     : t.done_for_day ? `Done${doneAt && t.done_on === ctx.data.today ? ' at ' + doneAt : ''}${t.overdue ? ' · was ' + overdueLabel(t.date, ctx.data.date).toLowerCase() : ''}`
     : t.done ? `Done later · ${fmtShort(t.done_on)}`
     : late ? overdueLabel(t.date, ctx.data.date) : 'One-off task';
-  return html`<div class=${'task todo-row' + (t.done_for_day ? ' done' : '') + (late ? ' overdue' : '')} id=${'todo-' + t.id}>
+  return html`<div class=${'task todo-row' + (t.done_for_day ? ' done' : '') + (late ? ' overdue' : '') + (cancelled ? ' cancelled' : '')} id=${'todo-' + t.id}>
     <div class="tname">
       ${editing
-        ? html`<form class="row" onSubmit=${saveTitle}><input type="text" value=${title} onInput=${(e) => setTitle(e.target.value)} aria-label="Task title" autofocus
-            onKeyDown=${(e) => { if (e.key === 'Escape') { setTitle(t.title); setEditing(false); } }} /><button class="btn sm primary">Save</button></form>`
+        ? html`<${TitleEditor} value=${t.title} label="Task title" onSave=${saveTitle} onCancel=${() => setEditing(false)} />`
         : html`<span class="todo-title">${late && html`<span class="od-dot" aria-hidden="true"></span>`}${t.title}</span>
-          <small class=${late ? 'od-label' : ''}>${late && html`<${Icon} name="alert" size=${13} /> `}${status}</small>`}
+          <small class=${late ? 'od-label' : ''}>${late && html`<${Icon} name="alert" size=${13} /> `}${status}</small>
+          ${subs.length > 0 && html`<button class="sub-progress" aria-expanded=${showSubs} onClick=${() => setSubsOpen(!subsOpen)}>
+            <${Icon} name=${showSubs ? 'chevD' : 'chevR'} size=${14} />${t.sub_done}/${subs.length} subtasks done</button>`}`}
     </div>
-    <div class="todo-actions">
-      <button class="btn sm" disabled=${t.temp || !!t.done} onClick=${() => requestStart({ task_label: t.title })} aria-label=${'Start a session: ' + t.title}>
-        <${Icon} name="play" size=${13} />Start</button>
-      ${t.done
-        ? html`<button class="btn sm" disabled=${t.temp} onClick=${() => setTodoDone(ctx, t, false)} aria-label=${'Reopen: ' + t.title}><${Icon} name="undo" size=${14} />Reopen</button>`
-        : html`<button class="btn sm primary" disabled=${t.temp} onClick=${() => setTodoDone(ctx, t, true)} aria-label=${'Mark done: ' + t.title}><${Icon} name="check" size=${14} />Done</button>`}
+    ${!editing && html`<div class="todo-actions">
+      ${cancelled
+        ? html`<button class="btn sm" onClick=${() => cancelTodo(ctx, t, false)} aria-label=${'Reopen task: ' + t.title}><${Icon} name="undo" size=${14} />Reopen task</button>`
+        : html`
+          <button class="btn sm" disabled=${t.temp || !!t.done} onClick=${() => requestStart({ task_label: t.title })} aria-label=${'Start a session: ' + t.title}>
+            <${Icon} name="play" size=${13} />Start</button>
+          ${t.done
+            ? html`<button class="btn sm" disabled=${t.temp} onClick=${() => setTodoDone(ctx, t, false)} aria-label=${'Reopen: ' + t.title}><${Icon} name="undo" size=${14} />Reopen</button>`
+            : html`<button class="btn sm primary" disabled=${t.temp} onClick=${() => requestDone(ctx, t)} aria-label=${'Mark done: ' + t.title}><${Icon} name="check" size=${14} />Done</button>`}`}
       <div class="menu" ref=${ref}>
         <button class="icon-btn" disabled=${t.temp} aria-label=${'Options — ' + t.title} aria-expanded=${menu} onClick=${() => setMenu(!menu)}><${Icon} name="more" /></button>
         ${menu && html`<div class="menu-pop">
-          <button class="item" onClick=${() => { setMenu(false); setTitle(t.title); setEditing(true); }}><${Icon} name="note" size=${16} />Edit title</button>
+          <button class="item" onClick=${() => { setMenu(false); setEditing(true); }}><${Icon} name="note" size=${16} />Edit title</button>
+          ${!cancelled && html`<button class="item" onClick=${() => { setMenu(false); setSubsOpen(true); setAdding(true); }}><${Icon} name="list" size=${16} />Add subtask</button>`}
+          ${cancelled
+            ? html`<button class="item" onClick=${() => { setMenu(false); cancelTodo(ctx, t, false); }}><${Icon} name="undo" size=${16} />Reopen task</button>`
+            : !t.done && html`<button class="item" onClick=${() => { setMenu(false); cancelTodo(ctx, t, true); }}><${Icon} name="ban" size=${16} />Cancel task</button>`}
           <button class="item danger" onClick=${() => { setMenu(false); deleteTodo(ctx, t); }}><${Icon} name="x" size=${16} />Delete</button>
         </div>`}
       </div>
-    </div>
+    </div>`}
+    ${showSubs && !t.temp && html`<${Subtasks} t=${t} ctx=${ctx} adding=${adding} setAdding=${setAdding} readOnly=${cancelled} />`}
   </div>`;
+}
+
+function Subtasks({ t, ctx, adding, setAdding, readOnly }) {
+  const [title, setTitle] = useState('');
+  const [editId, setEditId] = useState(null);
+  const subs = t.subtasks || [];
+  const call = async (m, u, b) => { try { await api(m, u, b); bus.emit(); } catch (e) { toast({ msg: e.message, kind: 'error' }); } };
+  const add = async (e) => {
+    e && e.preventDefault();
+    const v = title.trim(); if (!v) return;
+    setTitle('');
+    await call('POST', `/api/todos/${t.id}/subtasks`, { title: v });
+  };
+  return html`<div class="subtasks" aria-label=${'Subtasks of ' + t.title}>
+    ${subs.length > 0 && html`<ul class="sub-list">${subs.map(st => html`<li key=${st.id} class=${st.done ? 'done' : ''}>
+      ${editId === st.id
+        ? html`<${TitleEditor} value=${st.title} label="Subtask title" onCancel=${() => setEditId(null)}
+            onSave=${async (v) => { await call('PUT', `/api/subtasks/${st.id}`, { title: v }); setEditId(null); }} />`
+        : html`<label class="sub-check">
+            <input type="checkbox" checked=${!!st.done} disabled=${readOnly} onChange=${(e) => call('PUT', `/api/subtasks/${st.id}`, { done: e.target.checked, on: ctx.data.date })} />
+            <span class="sub-title">${st.title}</span></label>
+          ${!readOnly && html`<span class="sub-actions">
+            <button class="icon-btn sm" aria-label=${'Edit subtask: ' + st.title} onClick=${() => setEditId(st.id)}><${Icon} name="note" size=${15} /></button>
+            <button class="icon-btn sm" aria-label=${'Remove subtask: ' + st.title} onClick=${() => call('DELETE', `/api/subtasks/${st.id}`)}><${Icon} name="x" size=${15} /></button>
+          </span>`}`}
+    </li>`)}</ul>`}
+    ${!readOnly && (adding
+      ? html`<form class="sub-add" onSubmit=${add}>
+          <${AutoGrow} value=${title} onInput=${setTitle} onSave=${add} onCancel=${() => { setTitle(''); setAdding(false); }} label="New subtask" placeholder="Subtask" />
+          <div class="title-edit-actions"><button class="btn sm primary" disabled=${!title.trim()}>Add</button><button type="button" class="btn sm" onClick=${() => { setTitle(''); setAdding(false); }}>Done adding</button></div>
+        </form>`
+      : html`<button class="link-btn small" onClick=${() => setAdding(true)}><${Icon} name="plus" size=${13} /> Add subtask</button>`)}
+  </div>`;
+}
+
+// Parent marked Done while subtasks are open: complete them all, or only the parent.
+function DoneChoice({ t, ctx, onClose }) {
+  const open = (t.subtasks || []).filter(x => !x.done).length;
+  const go = async (mode) => { onClose(); await setTodoDone(ctx, t, true, mode); };
+  return html`<${Modal} title="Mark task done" onClose=${onClose}>
+    <div class="stack">
+      <p><strong class="wrap-anywhere">${t.title}</strong></p>
+      <p class="muted">${open} subtask${open === 1 ? ' is' : 's are'} not done yet.</p>
+      <div class="row wrap">
+        <button class="btn primary" onClick=${() => go('all')}><${Icon} name="check" size=${15} />Complete all subtasks</button>
+        <button class="btn" onClick=${() => go('parent')}>Complete parent only</button>
+        <button class="btn ghost" onClick=${onClose}>Cancel</button>
+      </div>
+    </div>
+  </${Modal}>`;
 }
 
 function SessionsCard({ sessions, isToday }) {
@@ -381,7 +505,13 @@ function NextAction({ ctx }) {
 
 // ---------- sections ----------
 // Progress is shown once: in the header when a category has several tasks, otherwise on the task row.
-function CategorySection({ cat, color, tasks, all, showTotal, ctx, compact }) {
+function CategorySection(props) {
+  // Social routines (e.g. Facebook & Instagram) get their own session-card layout.
+  if (props.all.length && props.all.every(t => t.type === 'social')) return html`<${SocialSection} ...${props} />`;
+  return html`<${PlainSection} ...${props} />`;
+}
+
+function PlainSection({ cat, color, tasks, all, showTotal, ctx, compact }) {
   const s = all.reduce((a, t) => ({ done: a.done + t.progress.scoreDone, target: a.target + t.progress.scoreTarget }), { done: 0, target: 0 });
   return html`<section class=${'section routine' + (compact ? ' compact' : '')} id=${compact ? undefined : 'cat-' + cat} aria-label=${cat}>
     <div class="routine-head">
@@ -458,6 +588,64 @@ function SharedCounter({ t, ctx }) {
     ${ids.map(id => html`<button class="site-btn" onClick=${() => addExtra(t, t.unit, id, `${word} · ${ctx.assets.get(id)?.name}`)}>+ ${ctx.assets.get(id)?.name || '?'}${by[id] ? html` <span class="muted">(${by[id]})</span>` : ''}</button>`)}
     ${!ids.length && html`<button class="site-btn" onClick=${() => addExtra(t, t.unit, null, word)}>+ ${word}</button>`}
   </div>`;
+}
+
+// ---------- Social routines: one card per session (Morning, Evening…), one block per video ----------
+function SocialSection({ cat, tasks, all, ctx, compact }) {
+  const sum = all.filter(t => t.status !== 'reported').reduce((a, t) => ({ done: a.done + liveDone(ctx, t).scoreDone, target: a.target + t.progress.scoreTarget }), { done: 0, target: 0 });
+  return html`<section class=${'section routine social-section' + (compact ? ' compact' : '')} id=${compact ? undefined : 'cat-' + cat} aria-label=${cat}>
+    <div class="social-head">
+      <h3>${cat}</h3>
+      ${!compact && sum.target > 0 && html`<span class=${'social-total' + (sum.done >= sum.target ? ' complete' : '')} aria-live="polite">${sum.done} of ${sum.target} posts published</span>`}
+    </div>
+    <div class="social-cards">${tasks.map(t => html`<${SocialCard} key=${t.id} t=${t} ctx=${ctx} />`)}</div>
+  </section>`;
+}
+
+function SocialCard({ t, ctx }) {
+  // Videos shown: the scheduled ones, any with saved checks, and new blocks added here (a new block is
+  // saved as soon as something in it is checked).
+  const [shown, setShown] = useState(0);
+  const live = liveDone(ctx, t);
+  const target = t.progress.scoreTarget;
+  const reported = t.status === 'reported';
+  const recorded = Math.max(t.target, 0, ...t.records.map(r => r.idx));
+  const n = Math.max(recorded, shown);
+  const title = [t.label, t.time_slot].filter(Boolean).join(' · ');
+  const dests = t.meta.destinations || [];
+  const blocks = [];
+  for (let i = 1; i <= n; i++) {
+    const produced = isOn(ctx, t, 'video', i);
+    const isExtra = i > t.target;
+    blocks.push(html`<div class="video-block" key=${i}>
+      <div class="vb-head">
+        <strong>Video ${i}</strong>${isExtra && html`<span class="vb-extra">extra</span>`}
+        <label class="cb"><input type="checkbox" checked=${produced} disabled=${reported}
+          onChange=${() => mark(ctx, t, { kind: 'video', idx: i, done: !produced, label: `Video ${i} produced` })} /><span>Produced</span></label>
+      </div>
+      <fieldset class="publish-to"><legend>Publish to</legend>
+        <div class="pt-list">${dests.map(d => {
+          const on = isOn(ctx, t, 'publication', i, d);
+          const name = ctx.assets.get(d)?.name || '?';
+          return html`<label class="cb"><input type="checkbox" checked=${on} disabled=${reported} aria-label=${`Video ${i} published on ${name}`}
+            onChange=${() => mark(ctx, t, { kind: 'publication', idx: i, asset: d, done: !on, label: `Published · ${name}` })} /><span>${name}</span></label>`;
+        })}</div>
+      </fieldset>
+    </div>`);
+  }
+  return html`<article class=${'social-card' + (target > 0 && live.scoreDone >= target ? ' complete' : '') + (reported ? ' reported' : '')} id=${'task-' + t.id} aria-label=${title}>
+    <header class="sc-head">
+      <h4>${title}</h4>
+      ${target > 0 && !reported && html`<span class="sc-progress num">${live.scoreDone}/${target} posted</span>`}
+      <${TaskMenu} t=${t} ctx=${ctx} />
+    </header>
+    ${t.meta.reported_from && !reported && html`<p class="small muted">Moved from ${fmtShort(t.meta.reported_from)}</p>`}
+    ${reported
+      ? html`<p class="small muted">Moved → ${fmtShort(t.reported_to)}. What remains counts on ${fmtShort(t.reported_to)}, not here.</p>`
+      : html`<div class="video-blocks">${blocks}</div>
+        <button class="btn sm ghost add-video" onClick=${() => setShown(n + 1)}><${Icon} name="plus" size=${14} />Add video</button>`}
+    ${t.note && html`<div class="note-line">${t.note}</div>`}
+  </article>`;
 }
 
 function SocialSlot({ t, ctx }) {

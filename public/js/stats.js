@@ -1,5 +1,6 @@
 // Stats: asset counts, actual activity, target completion — kept separate.
-import { html, useState, useResource, Bar, Chip, Modal, Empty, fmtDay, fmtShort, fmtDur, addDays, pct, KIND_PLURAL, KIND_LABELS } from './lib.js';
+import { html, useState, useResource, Bar, Chip, Modal, Empty, Icon, Ring, fmtDay, fmtShort, fmtDur, addDays, pct, KIND_PLURAL, KIND_LABELS } from './lib.js';
+import { CompletedModal } from './history.js';
 
 function rangeFor(kind, today, custom) {
   if (kind === 'day') return [today, today];
@@ -74,13 +75,41 @@ export function Stats() {
           <p class="small" style="margin-top:10px">Average daily score: <strong>${pct(data.avgDaily)}</strong> (tasks done ÷ tasks due, averaged over days with tasks).</p>
         </div>
         <div class="card"><h4>Daily score</h4>
-          <div class="daybars" role="img" aria-label="Daily score over the period">${data.daily.map(d => html`<div class=${'b' + (d.overall == null ? ' none' : '')} style=${{ height: (d.overall || 0) + '%' }} title=${`${fmtShort(d.date)} : ${d.overall == null ? 'nothing scheduled' : `${d.done}/${d.total} tasks · ${pct(d.overall)}`}`}></div>`)}</div>
-          <p class="small muted" style="margin-top:6px">Hatched: day with no tasks (excluded from averages).</p>
+          <div class="daybars" role="img" aria-label="Daily score over the period">${data.daily.map(d => html`<div class=${'b' + (d.overall == null ? ' none' : '')} style=${{ height: (d.overall || 0) + '%' }} title=${`${fmtShort(d.date)} : ${d.overall == null ? 'no score recorded' : `${d.done}/${d.total} tasks · ${pct(d.overall)}`}`}></div>`)}</div>
+          <p class="small muted" style="margin-top:6px">Hatched: no score recorded for that day (excluded from averages).</p>
         </div>
       </div>`}
     </section>
+    <${ScoreHistory} />
     ${inspect && html`<${AssetDetail} id=${inspect} range=${r} onClose=${() => setInspect(null)} />`}
   </div>`;
+}
+
+// Every date with recorded activity, newest first: its recorded score, a link to open that day on Today,
+// and its completed tasks.
+function ScoreHistory() {
+  const { data } = useResource('/api/history/scores');
+  const [limit, setLimit] = useState(30);
+  const [popup, setPopup] = useState(null);
+  if (!data) return null;
+  const days = data.days.slice(0, limit);
+  return html`<section class="section score-history" aria-label="Daily score history">
+    <div class="section-head"><h3>Daily score history</h3><span class="muted small">${data.days.length} day${data.days.length === 1 ? '' : 's'} with recorded activity</span></div>
+    ${data.days.length === 0 ? html`<${Empty} title="No activity recorded yet" />` : html`
+    <ul class="hist-list card">${days.map(d => html`<li key=${d.date}>
+      <${Ring} value=${d.pct} size=${36} stroke=${5}><span style="font-size:11px">${d.pct == null ? '—' : d.pct}</span></${Ring}>
+      <div class="hist-main">
+        <strong>${d.date === data.today ? 'Today · ' : ''}${fmtDay(d.date, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</strong>
+        <span class="small muted">${d.pct == null ? 'No score recorded' : `${d.done}/${d.total} tasks done · ${d.pct}%${d.source === 'backfill' ? ' · from saved records' : ''}`}</span>
+      </div>
+      <div class="hist-actions">
+        <a class="btn sm" href=${'#/today?date=' + d.date}>Open day</a>
+        <button class="btn sm" onClick=${() => setPopup(d.date)} aria-label=${'View completed tasks on ' + fmtShort(d.date)}><${Icon} name="history" size=${14} />View completed tasks</button>
+      </div>
+    </li>`)}</ul>
+    ${data.days.length > limit && html`<button class="btn sm" style="margin-top:10px" onClick=${() => setLimit(limit + 60)}>Show older days</button>`}`}
+    ${popup && html`<${CompletedModal} date=${popup} onClose=${() => setPopup(null)} />`}
+  </section>`;
 }
 
 function HList({ title, list, max, onPick, color, extra }) {
