@@ -31,7 +31,12 @@ export function createSupabaseRemote({ url, publishableKey, getToken, fetchImpl 
     && window.location.hostname === 'daily-workspace-git-cloud-sync-fakihiyassin01-9610s-projects.vercel.app'
     && new URLSearchParams(window.location.search).get('sync-debug') === '1';
   const report = (stage, details = {}) => {
-    if (diagnostics) console.info('Cloud sync diagnostic: ' + JSON.stringify({ stage, ...details }));
+    if (!diagnostics) return;
+    const record = JSON.stringify({ stage, ...details });
+    const root = document.documentElement;
+    const previous = JSON.parse(root.dataset.syncDiagnostics || '[]');
+    root.dataset.syncDiagnostics = JSON.stringify([...previous.slice(-15), JSON.parse(record)]);
+    console.info('Cloud sync diagnostic: ' + record);
   };
   const safeCode = (code) => typeof code === 'string'
     && /^(?:PGRST[0-9]{3}|[0-9A-Z]{5}|UNAUTHORIZED(?:_[A-Z_]{1,32})?|invalid_jwt|permission_denied)$/.test(code)
@@ -69,6 +74,7 @@ export function createSupabaseRemote({ url, publishableKey, getToken, fetchImpl 
       report('Supabase request failed before an HTTP response');
       throw Object.assign(new Error('No connection to the sync server'), { offline: true });
     }
+    report('Supabase HTTP response', { status: res.status });
     const text = await res.text();
     let body;
     try {
