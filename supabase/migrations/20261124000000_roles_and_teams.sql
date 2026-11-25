@@ -968,11 +968,29 @@ end $$;
 
 -- ---------------------------------------------------------------- rollout: keep existing accounts working
 -- Accounts that already have a synced dashboard had workspace access: they become 'admin'.
+-- snapshots has FORCE row level security, so even its owner (the SQL editor role, which may not
+-- bypass RLS) would see 0 rows here and nobody would keep access. Lift FORCE for this one read
+-- only; this whole script is one transaction, so no API request can ever see it lifted.
+alter table public.snapshots no force row level security;
+
 insert into public.app_users (user_id, role, status, signed_up_at, role_changed_at, role_changed_by)
 select s.user_id, 'admin', 'active', min(s.created_at), now(), 'migration'
   from public.snapshots s
  group by s.user_id
 on conflict (user_id) do nothing;
+
+do $$
+declare want int; got int;
+begin
+  select count(distinct user_id) into want from public.snapshots;
+  select count(*) into got from public.app_users where role_changed_by = 'migration';
+  if got <> want then
+    raise exception 'Rollout check failed: % accounts have a snapshot but % were kept as Admin. Nothing was changed.', want, got;
+  end if;
+  raise notice 'Rollout: % existing account(s) kept workspace access as Admin.', got;
+end $$;
+
+alter table public.snapshots force row level security;
 
 insert into public.user_audit (actor_id, target_id, action, old_value, new_value)
 select 'migration', u.user_id, 'backfill', null, 'admin'

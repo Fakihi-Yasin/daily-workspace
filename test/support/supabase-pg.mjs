@@ -12,10 +12,17 @@ export const CLAIM_NS = 'https://daily-workspace/';
 
 // What Supabase provides before any migration: API roles, auth.jwt(), and its default privileges
 // (everything new in `public` is granted to anon/authenticated — migrations must revoke explicitly).
+// Migrations run as "app_owner", which (like the Supabase SQL editor role at worst) is neither a
+// superuser nor allowed to bypass row level security, so FORCE RLS applies to the migrations too.
 const SHIM = `
 create role anon nologin;
 create role authenticated nologin;
-create schema auth;
+create role app_owner nosuperuser nobypassrls createrole;
+grant anon, authenticated to app_owner;
+grant create on database postgres to app_owner;
+alter schema public owner to app_owner;
+create schema auth authorization app_owner;
+set role app_owner;
 create function auth.jwt() returns jsonb language sql stable as $$
   select coalesce(nullif(current_setting('request.jwt.claim', true), ''), nullif(current_setting('request.jwt.claims', true), ''))::jsonb $$;
 grant usage on schema auth to anon, authenticated;
@@ -31,8 +38,11 @@ export async function createDb({ afterMigration } = {}) {
   const db = new PGlite();
   await db.exec(SHIM);
   const dir = path.join(ROOT, 'supabase', 'migrations');
+  await db.exec('reset role');
   for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort()) {
+    await db.exec('set role app_owner');
     await db.exec(fs.readFileSync(path.join(dir, f), 'utf8'));
+    await db.exec('reset role');
     if (afterMigration) await afterMigration(f, db);
   }
 

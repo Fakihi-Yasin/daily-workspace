@@ -186,11 +186,64 @@ app have no server to enforce them, so they keep working as before, without Team
    Admin exists. Promote everyone else from the **Users** page.
 4. Deploy the Preview build. Sign in, check **Users** and **Team Work**, then run `npm run check:rls`
    with `TOKEN_A` and `TOKEN_B` of two **test** Admin accounts.
+   - Preview needs its **own** Supabase project (never the Production one) and its own variables:
+     Vercel → Settings → Environment Variables, environment **Preview** only: `AUTH0_DOMAIN`,
+     `AUTH0_CLIENT_ID`, `AUTH0_AUDIENCE` (same values as Production), and `SUPABASE_URL` +
+     `SUPABASE_PUBLISHABLE_KEY` of the **test** project. Without the Auth0 variables, or with Supabase
+     but no `AUTH0_AUDIENCE`, the build stops on purpose ("Build stopped: …" in the Vercel log).
+   - In the test project: Authentication → Sign In / Providers → Third-Party Auth → add the same Auth0
+     tenant, then run both migrations in order (`20261123000000_cloud_snapshots.sql`, then this one).
+   - In Auth0 → Applications → your SPA, add the branch URL
+     `https://daily-workspace-git-daily-workspace-v3-<team>.vercel.app` to Allowed Callback URLs,
+     Allowed Logout URLs and Allowed Web Origins.
 5. **Sign-ups:** new signups now land on "Waiting for access", so you may turn **Disable Sign Ups**
    off if you want people to register themselves. If you use the optional `ALLOWED_EMAILS` Action,
    unknown emails are still refused before they can register.
-6. Production: repeat steps 2–4 on the Production project only when you decide to go live. Back up
-   first (Settings → Backup). The migration doesn't modify existing snapshot rows.
+6. Production: only after Preview works. Do it in this order, all in the **Production** project's SQL
+   Editor, and keep the previous working Vercel deployment so you can roll back (Deployments → ⋯ →
+   Instant Rollback; that changes only the app, never the database).
+
+   `snapshots` has **forced** row level security, so in the SQL Editor a plain
+   `select … from public.snapshots` may show 0 rows although the data is there. The scripts below lift
+   it inside their own transaction only.
+
+   a. **Review (read-only, ends with `rollback`).** Confirms the migration isn't applied yet and
+      lists every account the migration will keep as **Admin**. Find your own `user_id` in that list
+      and check it against Auth0 → User Management → Users → you → `user_id`, character for character.
+      ```sql
+      begin;
+      select to_regprocedure('public.register_me()') as register_me,
+             to_regclass('public.app_users')        as app_users,
+             to_regnamespace('app_private')         as app_private;
+      alter table public.snapshots no force row level security;  -- undone by the rollback
+      select user_id, slot, version, created_at, updated_at, pg_column_size(snapshot) as bytes
+        from public.snapshots order by created_at;
+      rollback;
+      ```
+   b. **Backup.** In the app: Settings → Backup (your own dashboard as a file). Then this server-side
+      copy of every snapshot, in a schema the Data API doesn't expose. It must say `identical = true`:
+      ```sql
+      begin;
+      alter table public.snapshots no force row level security;
+      create schema if not exists backup;
+      revoke all on schema backup from public, anon, authenticated;
+      create table backup.snapshots_20261125 as table public.snapshots;
+      revoke all on table backup.snapshots_20261125 from public, anon, authenticated;
+      select (select count(*) from public.snapshots) as live_rows,
+             (select count(*) from backup.snapshots_20261125) as backup_rows,
+             (select md5(string_agg(user_id || rev || snapshot::text, ',' order by user_id, slot)) from public.snapshots)
+           = (select md5(string_agg(user_id || rev || snapshot::text, ',' order by user_id, slot)) from backup.snapshots_20261125) as identical;
+      alter table public.snapshots force row level security;
+      commit;
+      ```
+   c. **Migration:** run `20261124000000_roles_and_teams.sql`. It ends with the notice
+      `Rollout: N existing account(s) kept workspace access as Admin`. N must equal the number of
+      accounts in (a). If they don't match, it stops and changes nothing. Then run
+      `notify pgrst, 'reload schema';`.
+   d. **Super Admin:** `select app_private.bootstrap_super_admin('<your user_id from a>');`
+   e. **Check:** `select user_id, role, status from public.app_users order by role;` shows you as
+      `super_admin` and the others as `admin`. In the app: sign in, open **Users**, and check your
+      tasks are there.
 
 A new signup appears in **Users** the first time the app loads after their Auth0 sign-in. That's
 the redirect straight after signup, even if they never reach the workspace.
