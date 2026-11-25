@@ -792,3 +792,8 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-directio
 .pc-nums .k { font-size: 12.5px; color: var(--muted); }
 .pc-rules { margin: 10px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
 .pc-cmd { white-space: pre-wrap; word-break: break-all; background: var(--track); border-radius: 10px; padding: 12px; font-size: 12.5px; margin: 10px 0; user-select: all; }
+.pc-split-bar { display: flex; height: 8px; border-radius: 6px; overflow: hidden; background: var(--track); }
+.pc-split-bar i { display: block; height: 100%; }
+.pc-split .w { background: #2b6cff; } .pc-split .p { background: #e0559b; } .pc-split .u { background: var(--line-2); }
+.pc-split .row { gap: 12px; margin-top: 6px; }
+.pc-split .dot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; }

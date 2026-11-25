@@ -41,7 +41,7 @@ test('the agent sends per-day totals with its key; retries and older copies neve
   await call(null, 'pc_agent_sync', { p_key: key, p_days: { [day(0)]: 3000 } }); // older copy
   await call(null, 'pc_agent_sync', { p_key: key, p_days: { [day(0)]: 3900 } });
   const sum = await call('ME', 'pc_time_summary', { p_from: day(-6), p_to: day(0) });
-  assert.deepEqual(sum.days, [{ day: day(-1), seconds: 7200 }, { day: day(0), seconds: 3900 }]);
+  assert.deepEqual(sum.days, [{ day: day(-1), seconds: 7200, work: 0, personal: 0 }, { day: day(0), seconds: 3900, work: 0, personal: 0 }]);
   assert.equal(sum.total, 11100);
   assert.equal(sum.devices, 1);
   // A second computer adds up on the same day.
@@ -49,8 +49,6 @@ test('the agent sends per-day totals with its key; retries and older copies neve
   await call(null, 'pc_agent_sync', { p_key: k2, p_days: { [day(0)]: 600 } });
   assert.equal((await call('ME', 'pc_time_summary', { p_from: day(0), p_to: day(0) })).total, 4500);
   // Only durations per day are stored: no other columns of activity exist.
-  const cols = (await pg.admin("select column_name from information_schema.columns where table_name = 'pc_work_days' order by ordinal_position")).rows.map(r => r.column_name);
-  assert.deepEqual(cols, ['device_id', 'user_id', 'day', 'seconds', 'updated_at']);
 });
 
 test('bad input is refused; old and future days are ignored', async () => {
@@ -74,6 +72,25 @@ test('pause and idle minutes: the latest change wins, from the dashboard or the 
   assert.equal((await call('OTHER', 'pc_time_summary', { p_from: day(0), p_to: day(0) })).settings.idle_minutes, 5, 'settings are per account');
 });
 
+test('Activity Details on: only daily Work / Personal totals arrive, never app or site names', async () => {
+  const k3 = (await call('ME', 'pc_device_create', { p_name: 'Details PC' })).key;
+  await call(null, 'pc_agent_sync', { p_key: k3, p_days: { [day(-2)]: { total: 3600, work: 2400, personal: 600 } } });
+  let sum = await call('ME', 'pc_time_summary', { p_from: day(-2), p_to: day(-2) });
+  assert.deepEqual([sum.total, sum.work, sum.personal], [3600, 2400, 600]);
+  // Reclassified on the computer (same total): the new split replaces the old one.
+  await call(null, 'pc_agent_sync', { p_key: k3, p_days: { [day(-2)]: { total: 3600, work: 3000, personal: 0 } } });
+  sum = await call('ME', 'pc_time_summary', { p_from: day(-2), p_to: day(-2) });
+  assert.deepEqual([sum.work, sum.personal], [3000, 0]);
+  // An older, smaller copy changes nothing.
+  await call(null, 'pc_agent_sync', { p_key: k3, p_days: { [day(-2)]: { total: 100, work: 100, personal: 0 } } });
+  sum = await call('ME', 'pc_time_summary', { p_from: day(-2), p_to: day(-2) });
+  assert.deepEqual([sum.total, sum.work], [3600, 3000]);
+  await assert.rejects(call(null, 'pc_agent_sync', { p_key: k3, p_days: { [day(-2)]: { total: 100, work: 80, personal: 80 } } }), /out of range/);
+  const cols = (await pg.admin("select column_name from information_schema.columns where table_name = 'pc_work_days' order by ordinal_position")).rows.map(r => r.column_name);
+  assert.deepEqual(cols, ['device_id', 'user_id', 'day', 'seconds', 'updated_at', 'work_seconds', 'personal_seconds'], 'no column could hold an app or a site');
+  await call('ME', 'pc_device_revoke', { p_device_id: (await call('ME', 'pc_device_list')).find(d => d.name === 'Details PC').id });
+});
+
 test('nobody else can read or change this account’s PC time', async () => {
   assert.equal((await call('OTHER', 'pc_time_summary', { p_from: day(-6), p_to: day(0) })).total, 0);
   await assert.rejects(call('OTHER', 'pc_device_revoke', { p_device_id: deviceId }), /not found/);
@@ -94,7 +111,19 @@ test('a blocked account’s computer is refused; a disconnected computer’s key
   await call('ME', 'pc_device_revoke', { p_device_id: deviceId });
   await assert.rejects(call(null, 'pc_agent_sync', { p_key: key, p_days: {} }), /invalid_device_key/);
   assert.deepEqual((await call('ME', 'pc_device_list')).map(d => d.name), ['Laptop']);
-  assert.equal((await call('ME', 'pc_time_summary', { p_from: day(-6), p_to: day(0) })).total, 7200 + 3900 + 600);
+  assert.equal((await call('ME', 'pc_time_summary', { p_from: day(-6), p_to: day(0) })).total, 7200 + 3900 + 600 + 3600, 'incl. the Details PC day');
+});
+
+test('Delete history removes the synced totals of this account only', async () => {
+  const before = (await call('ME', 'pc_time_summary', { p_from: day(-30), p_to: day(1) })).total;
+  assert.ok(before > 0);
+  const other = (await call('OTHER', 'pc_device_create', { p_name: 'Other PC' })).key;
+  await call(null, 'pc_agent_sync', { p_key: other, p_days: { [day(0)]: 500 } });
+  const r = await call('ME', 'pc_history_delete', { p_before: null });
+  assert.ok(r.deleted_days > 0);
+  assert.equal((await call('ME', 'pc_time_summary', { p_from: day(-30), p_to: day(1) })).total, 0);
+  assert.equal((await call('OTHER', 'pc_time_summary', { p_from: day(0), p_to: day(0) })).total, 500, 'other accounts untouched');
+  await assert.rejects(call(null, 'pc_history_delete', { p_before: null }));
 });
 
 test('deleting the account removes its computers and PC time', async () => {

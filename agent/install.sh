@@ -60,7 +60,7 @@ Exec=$SHARE/dw-pc-time.py notify
 Icon=appointment-soon
 Terminal=false
 Categories=Utility;
-Actions=pause;resume;
+Actions=pause;resume;details;
 
 [Desktop Action pause]
 Name=Pause
@@ -69,6 +69,10 @@ Exec=$SHARE/dw-pc-time.py pause
 [Desktop Action resume]
 Name=Resume
 Exec=$SHARE/dw-pc-time.py resume
+
+[Desktop Action details]
+Name=Activity Details (this computer)
+Exec=$SHARE/dw-pc-time.py open
 DESK
 
 systemctl --user daemon-reload

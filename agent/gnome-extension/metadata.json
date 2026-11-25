@@ -1,0 +1,7 @@
+{
+  "uuid": "focused-app@dailyworkspace.app",
+  "name": "Daily Workspace — focused app name",
+  "description": "For PC Work Time Activity Details: lets the local agent ask which app is in front (its name only — never window titles or contents). GNOME on Wayland offers no other way.",
+  "shell-version": ["45", "46", "47", "48"],
+  "url": "https://daily-workspace-nu.vercel.app/"
+}

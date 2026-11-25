@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Daily Workspace — website time (domains only)",
+  "version": "1.0.0",
+  "description": "Optional part of PC Work Time Activity Details: tells the agent on THIS computer the domain of the active tab (e.g. github.com). Never page titles, full addresses, page contents or typing.",
+  "permissions": ["tabs", "alarms", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js", "scripts": ["background.js"] },
+  "options_ui": { "page": "options.html", "open_in_tab": false },
+  "browser_specific_settings": { "gecko": { "id": "pc-time@dailyworkspace.app", "strict_min_version": "121.0" } }
+}

@@ -4,6 +4,7 @@
 import { html, useState, Icon, Chip, Modal, Empty, toast, addDays, fmtShort } from './lib.js';
 import { useRpc, change } from './teamwork.js';
 
+const guessOs = () => { const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || ''; return /win/i.test(p) ? 'windows' : /mac/i.test(p) ? 'mac' : 'linux'; };
 export const hasPcTime = () => !!(window.__dash && window.__dash.rpc);
 const mondayOf = (d) => addDays(d, -((new Date(d + 'T12:00:00Z').getUTCDay() + 6) % 7));
 // Hours and minutes only ("2 h 05 min", "6 min").
@@ -38,9 +39,22 @@ export function PcTimeCard({ today }) {
           <div><span class="v num">${hm(todaySec)}</span><span class="k">Today</span></div>
           <div><span class="v num">${hm(data.total)}</span><span class="k">This week</span></div>
         </div>
+        <${SplitBar} total=${data.total} work=${data.work} personal=${data.personal} label="This week" />
         <div class="row small muted" style="margin-top:8px"><span style="flex:1">Last update from your PC: ${ago(data.last_seen_at)}</span>
           <button class="btn sm" onClick=${() => setPaused(!paused)}><${Icon} name=${paused ? 'play' : 'pause'} size=${14} />${paused ? 'Resume' : 'Pause'}</button></div>`}
   </section>`;
+}
+
+// Work vs Personal (from Activity Details, classified on the computer; only these totals are synced).
+function SplitBar({ total, work, personal, label }) {
+  if (!total) return null;
+  if (!work && !personal) return html`<p class="small muted" style="margin-top:8px">Work vs Personal: turn on Activity Details on your computer (Settings → PC Work Time).</p>`;
+  const other = Math.max(0, total - work - personal);
+  const pc = (v) => `${(100 * v / total).toFixed(1)}%`;
+  return html`<div class="pc-split" style="margin-top:10px" aria-label=${label + ': Work ' + hm(work) + ', Personal ' + hm(personal) + ', Uncategorized ' + hm(other)}>
+    <div class="pc-split-bar"><i class="w" style=${{ width: pc(work) }}></i><i class="p" style=${{ width: pc(personal) }}></i><i class="u" style=${{ width: pc(other) }}></i></div>
+    <div class="row small"><span><b class="dot w"></b>Work ${hm(work)}</span><span><b class="dot p"></b>Personal ${hm(personal)}</span><span class="muted"><b class="dot u"></b>Other ${hm(other)}</span></div>
+  </div>`;
 }
 
 // Stats: total for the selected range, kept apart from Focus.
@@ -49,7 +63,7 @@ export function PcTimeTile({ from, to }) {
   if (!hasPcTime() || !data || (!data.devices && !data.total)) return null;
   const days = data.days.filter(d => d.seconds > 0).length;
   return html`<div class="tile"><span class="v">${hm(data.total)}</span><span class="k">PC Work Time</span>
-    <span class="small muted">${days} day${days === 1 ? '' : 's'} · separate from Focus</span></div>`;
+    <span class="small muted">${days} day${days === 1 ? '' : 's'}${data.work || data.personal ? ` · Work ${hm(data.work)} · Personal ${hm(data.personal)}` : ''} · separate from Focus</span></div>`;
 }
 
 // Settings → PC Work Time.
@@ -79,7 +93,11 @@ export function PcTimeSettings() {
       const cfg = window.__DASH_CONFIG || {};
       const payload = { o: location.origin, u: cfg.supabase.url, k: cfg.supabase.publishableKey, d: r.key, n: r.name };
       const code = btoa(unescape(encodeURIComponent(JSON.stringify(payload)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      setIssued({ name: r.name, code, command: `curl -fsSL ${location.origin}/pc-agent/install.sh | bash -s -- ${code}` });
+      setIssued({ name: r.name, code, os: guessOs(), commands: {
+        linux: `curl -fsSL ${location.origin}/pc-agent/install.sh | bash -s -- ${code}`,
+        mac: `curl -fsSL ${location.origin}/pc-agent/install-macos.sh | bash -s -- ${code}`,
+        windows: `$env:DW_CODE='${code}'; irm ${location.origin}/pc-agent/install-windows.ps1 | iex`,
+      } });
       setName('');
     } catch { /* toast shown */ } finally { setBusy(false); }
   };
@@ -95,9 +113,22 @@ export function PcTimeSettings() {
       <p class="muted">A small program on your computer counts the time you actively use it and adds it to your account, separately from Focus Sessions.</p>
       <ul class="small pc-rules">
         <li>Counts while you use the keyboard or mouse. Stops after <strong>${s ? s.idle_minutes : 5} min</strong> without input, while the screen is locked, and while the computer sleeps or is off. Continues by itself when you come back.</li>
-        <li>Only <strong>one total per day</strong> is stored. No screenshots, no apps or window titles, nothing you type, no list of when you were active.</li>
-        <li>Offline, your computer keeps the totals and sends them when the internet is back.</li>
+        <li>Your account stores only <strong>daily totals</strong>: active time and, if you turn on Activity Details, how much of it was Work or Personal.</li>
+        <li>Never, on any system: screenshots or screen recording, what you type (keys, passwords, messages, clipboard), window or page titles, full web addresses. Idle time comes only from the system’s own idle timer.</li>
+        <li>Offline, your computer keeps counting and sends the totals when the internet is back.</li>
       </ul>
+    </section>
+
+    <section class="card">
+      <h3>Activity Details <span class="small muted">(optional, off by default)</span></h3>
+      <p class="muted">See where your time went: time per app and, with the browser extension, per website domain, a daily timeline, and Work / Personal / Uncategorized. These details <strong>stay on the computer</strong>; only the daily Work and Personal totals reach your account.</p>
+      <ol class="small pc-rules">
+        <li>On the computer, run <code>dw-pc-time details on</code>, then <code>dw-pc-time open</code> to see the timeline, classify apps and sites, exclude some, or delete history (Linux: also “PC Work Time → Activity Details” in the app menu).</li>
+        <li>Website domains (optional): run <code>dw-pc-time browser-extension</code> and follow the steps (Chrome, Edge, Brave; Firefox as a temporary add-on). It sends only the domain of the active tab — e.g. github.com — to the agent on the same computer.</li>
+        <li>Ubuntu on Wayland (the default): GNOME doesn’t let programs see the app in front. Run <code>dw-pc-time gnome-extension</code>, then log out and back in. Without it, Linux records websites (with the browser extension) but shows other apps as “Unknown app”.</li>
+      </ol>
+      <div class="row" style="margin-top:12px"><span class="small muted" style="flex:1">Delete history: on the computer, use the local page. Here you can delete the synced daily totals.</span>
+        <button class="btn sm danger" onClick=${() => confirm('Delete all synced PC Work Time totals (active, Work, Personal) from your account? Your computers keep their local copies and send totals again from now on.') && change('pc_history_delete', { p_before: null }, 'Synced PC Work Time history deleted').catch(() => {})}>Delete synced history</button></div>
     </section>
 
     <section class="card">
@@ -122,18 +153,23 @@ export function PcTimeSettings() {
             <span class="small muted">last update ${ago(d.last_seen_at)}</span>
             <button class="btn sm danger" onClick=${() => revoke(d)}>Disconnect</button></li>`)}</ul>`}
       <form class="row wrap" style="align-items:flex-end;margin-top:14px" onSubmit=${connect}>
-        <label class="field" style="flex:1;min-width:220px">Connect a computer (Ubuntu 24.04)
+        <label class="field" style="flex:1;min-width:220px">Connect a computer (Ubuntu / Linux, macOS or Windows)
           <input type="text" maxlength="80" placeholder="Name, e.g. Office PC" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
         <button class="btn primary" disabled=${busy || !name.trim()}><${Icon} name="plus" size=${16} />Connect this PC</button>
       </form>
     </section>
 
     ${issued && html`<${Modal} title=${'Connect “' + issued.name + '”'} onClose=${() => setIssued(null)} wide>
-      <p>On that computer, open a <strong>Terminal</strong> and run this command (no sudo needed):</p>
-      <pre class="pc-cmd" tabindex="0">${issued.command}</pre>
-      <div class="row"><button class="btn primary" onClick=${() => copy(issued.command)}>Copy command</button><span class="spacer"></span>
+      <div class="seg" role="tablist" aria-label="Operating system">${[['linux', 'Ubuntu / Linux'], ['mac', 'macOS'], ['windows', 'Windows']].map(([k, l]) => html`<button role="tab" aria-selected=${issued.os === k} class=${issued.os === k ? 'on' : ''} onClick=${() => setIssued({ ...issued, os: k })}>${l}</button>`)}</div>
+      <p style="margin-top:12px">${issued.os === 'windows' ? html`On that computer, open <strong>PowerShell</strong> (no admin needed) and run:` : html`On that computer, open <strong>Terminal</strong> and run (no sudo needed):`}</p>
+      <pre class="pc-cmd" tabindex="0">${issued.commands[issued.os]}</pre>
+      <div class="row"><button class="btn primary" onClick=${() => copy(issued.commands[issued.os])}>Copy command</button><span class="spacer"></span>
         <button class="btn" onClick=${() => copy(issued.code)}>Copy code only</button></div>
-      <p class="small muted" style="margin-top:12px">It installs the agent in your home folder and starts it with your session. The code contains this computer’s key: it is shown only now, can only add PC time to your account, and stops working when you disconnect the computer. To remove the agent later: <code>curl -fsSL ${location.origin}/pc-agent/uninstall.sh | bash</code></p>
+      <p class="small muted" style="margin-top:12px">${issued.os === 'linux' ? 'Needs python3 and gdbus (both come with Ubuntu). Starts with your desktop session (systemd user service).'
+        : issued.os === 'mac' ? 'Needs python3 (macOS offers to install the Command Line Tools the first time). Starts at login (LaunchAgent).'
+        : 'Needs Python 3.9+ (winget install Python.Python.3.12). Starts at login (your user’s Run key), with no window.'}
+        The code contains this computer’s key: it is shown only now, can only add PC time to your account, and stops working when you disconnect the computer.
+        ${issued.os === 'linux' && html` Remove later: <code>curl -fsSL ${location.origin}/pc-agent/uninstall.sh | bash</code>`}</p>
     <//>`}
   </div>`;
 }
