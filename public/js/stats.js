@@ -1,6 +1,7 @@
 // Stats: asset counts, actual activity, target completion — kept separate.
 import { html, useState, useResource, Bar, Chip, Modal, Empty, Icon, Ring, fmtDay, fmtShort, fmtDur, addDays, pct, KIND_PLURAL, KIND_LABELS } from './lib.js';
 import { CompletedModal } from './history.js';
+import { TeamCountTiles } from './teamwork.js';
 
 function rangeFor(kind, today, custom) {
   if (kind === 'day') return [today, today];
@@ -43,6 +44,8 @@ export function Stats() {
         ${countTile('pinterest', 'Pinterest accounts')}${countTile('youtube', 'YouTube channels')}
         <div class="tile"><span class="v">${counts.digital_projects.active}</span><span class="k">Digital products</span>${counts.digital_projects.done ? html`<span class="small muted">${counts.digital_projects.done} done</span>` : ''}</div>
       </div></section>
+
+    ${window.__dash && window.__dash.rpc && html`<section class="section"><div class="section-head"><h3>Team Work</h3><span class="muted small">shared teams, kept apart from your personal scores</span></div><${TeamCountTiles} /></section>`}
 
     <section class="section"><div class="section-head"><h3>Actual activity</h3><span class="muted small">what was really done, extras included</span></div>
       <div class="tiles">

@@ -132,3 +132,88 @@ The database password and the `sb_secret_…` / service_role key are not used an
 ### Storage interface
 The engine only talks to storage through `web/storage.js` (browser-only) or `web/cloud-store.js`
 (sync), which share the same methods: `load`, `save`, `revision`, `remove`, prefs.
+
+## Roles, User Management and Team Work (V3, needs Supabase sync)
+
+Roles and teams exist only in builds with Supabase sync. The browser-only build (V1) and the localhost
+app have no server to enforce them, so they keep working as before, without Team Work or Users.
+
+### What it does
+- **Roles** (`public.app_users`, keyed by the Auth0 user id `sub`, never by name or email):
+  - **User**: every new signup. Sees a "Waiting for access" screen only. No workspace, no Team Work.
+  - **Admin**: the personal workspace plus Team Work for the teams they own or have joined.
+  - **Super Admin**: Admin features, plus the **Users** page and a read-only **All teams** view.
+    Personal dashboards stay private. Nobody, a Super Admin included, can read another account's snapshot.
+- **Blocking** applies on the account's next request to the database, including from a browser that is
+  already signed in. Open browsers also re-check access every 20 seconds and on focus, then switch to a
+  "This account is blocked" screen. The data stays where it is, and unblocking restores it.
+- **Enforcement is in the database.** New tables have RLS enabled with no policies and no API grants.
+  All reads and writes go through `SECURITY DEFINER` functions that check the caller's role, status
+  and team membership on every call. Snapshot reads and writes now also require an active Admin or
+  Super Admin. The sidebar only hides links: typing `#/users` as an Admin shows "Not available", and
+  calling the functions directly is refused (HTTP 403).
+- **Team data** (`teams`, `team_members`, `team_tasks`, `team_future_projects`, `team_events`) is stored
+  apart from personal snapshots. Backups and restores of a personal dashboard never include it.
+- **Who changed what:** every role change and block or unblock is recorded in `public.user_audit`, with
+  the actor, the target, the old and new values, and the time. The Users page shows the latest changes.
+
+### Rollout (Preview first)
+1. **Auth0 Action:** replace the code of the `supabase-role` post-login Action with the code below, then
+   **Deploy**. Name, email and the signup date come from this signed token. A user can't edit them, and
+   they are only shown to people, never used for permissions. Only a **verified** email can be used to
+   add someone to a team, so nobody can claim a friend's address by signing up with it.
+   ```js
+   exports.onExecutePostLogin = async (event, api) => {
+     api.accessToken.setCustomClaim('role', 'authenticated'); // Supabase Third-Party Auth (unchanged)
+     const ns = 'https://daily-workspace/';
+     api.accessToken.setCustomClaim(ns + 'email', event.user.email || null);
+     api.accessToken.setCustomClaim(ns + 'email_verified', !!event.user.email_verified);
+     api.accessToken.setCustomClaim(ns + 'name', event.user.name || event.user.nickname || null);
+     api.accessToken.setCustomClaim(ns + 'created_at', event.user.created_at || null);
+   };
+   ```
+2. **Database:** in the Preview project's SQL Editor, run
+   `supabase/migrations/20261124000000_roles_and_teams.sql`. **Do this before deploying the new
+   build**, or the new build can't check access and shows "Can't open the workspace".
+   - Every account that already has a synced dashboard becomes **Admin**, so existing users keep their
+     workspace. This is logged in the audit as "rollout". Nobody is made Super Admin automatically.
+3. **First Super Admin:** in Auth0 → **User Management → Users**, open your own user and copy its
+   **user_id** (for example `auth0|64f…`). In the SQL Editor, run:
+   ```sql
+   select app_private.bootstrap_super_admin('auth0|64f…');
+   ```
+   It only works from the SQL Editor (not through the API), and it refuses to run once an active Super
+   Admin exists. Promote everyone else from the **Users** page.
+4. Deploy the Preview build. Sign in, check **Users** and **Team Work**, then run `npm run check:rls`
+   with `TOKEN_A` and `TOKEN_B` of two **test** Admin accounts.
+5. **Sign-ups:** new signups now land on "Waiting for access", so you may turn **Disable Sign Ups**
+   off if you want people to register themselves. If you use the optional `ALLOWED_EMAILS` Action,
+   unknown emails are still refused before they can register.
+6. Production: repeat steps 2–4 on the Production project only when you decide to go live. Back up
+   first (Settings → Backup). The migration doesn't modify existing snapshot rows.
+
+A new signup appears in **Users** the first time the app loads after their Auth0 sign-in. That's
+the redirect straight after signup, even if they never reach the workspace.
+
+### Rules in short
+| | Owner of the team | Member | Super Admin (not a member) | Other Admins |
+|---|---|---|---|---|
+| See the team, members (name, email), tasks, scores | ✔ | ✔ | ✔ read-only | ✖ not even its name |
+| Add / remove members, rename, delete the team | ✔ | ✖ | ✖ | ✖ |
+| Create tasks | ✔ | ✔ | ✖ | ✖ |
+| Edit, reassign, delete a task | ✔ any task | tasks they created | ✖ | ✖ |
+| Change a task's status | ✔ | tasks they created or that are assigned to them | ✖ | ✖ |
+| Future projects (add, edit, move into active work) | ✔ | ✖ | ✖ | ✖ |
+
+Only current members can be assignees. Removing a member unassigns their tasks in that team.
+**Daily team score** for a selected day: the tasks assigned to the member and due that day that were
+done by the end of that day, divided by the tasks due that day. Days use the workspace timezone.
+"Completed that day" lists every task the member finished that day, whatever its due date. Team scores
+are separate from the personal Daily Score.
+
+### Local test setup
+`node scripts/fake-sync-server.js 54321` runs the real migrations in PGlite (in-memory Postgres,
+TEST ONLY). Build with `SUPABASE_URL=http://localhost:54321 SUPABASE_PUBLISHABLE_KEY=sb_publishable_test npm run build:test`,
+then serve it with `node scripts/preview.js dist-test 4323`. Open
+`http://localhost:54321/__bootstrap?user=<name>` to make the test account `test|<name>` the first
+Super Admin. `npm test` includes `test/roles-teams.test.js`, which runs the same SQL.

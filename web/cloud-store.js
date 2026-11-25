@@ -24,39 +24,15 @@ const PUSH_DELAY_MS = 600;
 
 export const newRev = () => `${Date.now().toString(36)}-${(globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)).slice(0, 13)}`;
 
-// Thin PostgREST client. `getToken` returns the Auth0 access token (Supabase Third-Party Auth).
-export function createSupabaseRemote({ url, publishableKey, getToken, fetchImpl = globalThis.fetch.bind(globalThis) }) {
-  const base = url.replace(/\/+$/, '') + '/rest/v1';
-  async function call(path, init = {}) {
-    let token;
-    try { token = await getToken(); }
-    catch (e) { throw Object.assign(new Error(e.message || 'Sign-in expired'), { auth: !e.offline, offline: !!e.offline }); }
-    let res;
-    try {
-      res = await fetchImpl(base + path, { ...init, headers: { apikey: publishableKey, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) } });
-    } catch (e) {
-      throw Object.assign(new Error('No connection to the sync server'), { offline: true });
-    }
-    const text = await res.text();
-    const body = text ? JSON.parse(text) : null;
-    if (!res.ok) {
-      const msg = (body && (body.message || body.msg || body.error)) || `HTTP ${res.status}`;
-      throw Object.assign(new Error(`Sync server: ${msg}`), { status: res.status, auth: res.status === 401 || /jwt|token/i.test(msg) });
-    }
-    return body;
-  }
+// Snapshot calls through the database functions (supabase/migrations). Reads use get_snapshot(),
+// which refuses a blocked or waiting account with an explicit error (`denied`) instead of returning
+// "no data", so a device never mistakes revoked access for an empty cloud.
+export function createSupabaseRemote({ rpc }) {
+  const tag = (e) => { if (!e.denied && !e.offline && !e.auth) e.message = `Sync server: ${e.message}`; throw e; };
   return {
-    async head(slot) {
-      const rows = await call(`/snapshots?select=rev,updated_at&slot=eq.${slot}`);
-      return rows[0] || null;
-    },
-    async get(slot) {
-      const rows = await call(`/snapshots?select=rev,snapshot,updated_at&slot=eq.${slot}`);
-      return rows[0] || null;
-    },
-    async save(slot, expectedRev, rev, snapshot) {
-      return call('/rpc/save_snapshot', { method: 'POST', body: JSON.stringify({ p_slot: slot, p_expected_rev: expectedRev, p_new_rev: rev, p_snapshot: snapshot }) });
-    },
+    head: (slot) => rpc('get_snapshot', { p_slot: slot, p_with_data: false }).catch(tag),
+    get: (slot) => rpc('get_snapshot', { p_slot: slot, p_with_data: true }).catch(tag),
+    save: (slot, expectedRev, rev, snapshot) => rpc('save_snapshot', { p_slot: slot, p_expected_rev: expectedRev, p_new_rev: rev, p_snapshot: snapshot }).catch(tag),
   };
 }
 
@@ -96,6 +72,8 @@ export function createCloudStore({ ls = globalThis.localStorage, userId, remote,
   }
 
   function fail(e) {
+    // Blocked or no longer allowed: stop syncing (nothing retried); the app re-checks access.
+    if (e.denied) { stopped = true; timers.clearInterval(pollTimer); timers.clearTimeout(pushTimer); emit({ state: 'denied', error: e.message }); return; }
     if (e.auth) emit({ state: 'signin', error: 'Your session expired. Sign in again to sync. Your changes are kept on this device.' });
     else if (e.offline) emit({ state: 'offline', error: 'Offline. Changes are kept on this device and will sync when the connection returns.' });
     else emit({ state: 'error', error: e.message || String(e) });
@@ -143,7 +121,7 @@ export function createCloudStore({ ls = globalThis.localStorage, userId, remote,
         return await onNewerCloud(r ? r.rev : null);
       } catch (e) {
         fail(e);
-        if (!e.auth) { schedulePush(retryDelay); retryDelay = Math.min(retryDelay * 2, 60000); }
+        if (!e.auth && !e.denied) { schedulePush(retryDelay); retryDelay = Math.min(retryDelay * 2, 60000); }
       }
       return status.state;
     })();
