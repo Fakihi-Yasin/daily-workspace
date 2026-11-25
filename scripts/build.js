@@ -117,7 +117,7 @@ fs.writeFileSync(path.join(outdir, 'index.html'), `<!doctype html>
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Today · Dashboard</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/favicon.svg?v=green" type="image/svg+xml" />
   <link rel="stylesheet" href="/assets/styles.css" />
   <script src="/assets/boot.js"></script>
 </head>
