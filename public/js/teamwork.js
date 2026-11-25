@@ -70,13 +70,17 @@ function TeamLanding() {
   const [scope, setScope] = useState('mine');
   const { data, error } = useRpc('team_list', { p_scope: scope });
   const [name, setName] = useState('');
+  const [picked, setPicked] = useState([]); // accounts chosen as members of the new team
   const [busy, setBusy] = useState(false);
   const create = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
     setBusy(true);
-    try { const r = await change('team_create', { p_name: name.trim() }, 'Team created'); setName(''); location.hash = '#/teams/' + r.id; }
-    catch { /* toast shown */ } finally { setBusy(false); }
+    try {
+      const r = await change('team_create_with_members', { p_name: name.trim(), p_member_ids: picked.map(u => u.id) },
+        picked.length ? `Team created with ${picked.length} member${picked.length === 1 ? '' : 's'}` : 'Team created');
+      setName(''); setPicked([]); location.hash = '#/teams/' + r.id;
+    } catch { /* toast shown */ } finally { setBusy(false); }
   };
   return html`<div>
     <header class="page-head"><h1>Team Work</h1><span class="muted">Private teams: only their members see them.</span></header>
@@ -87,10 +91,13 @@ function TeamLanding() {
           <button role="tab" aria-selected=${scope === 'mine'} class=${scope === 'mine' ? 'on' : ''} onClick=${() => setScope('mine')}>My teams</button>
           <button role="tab" aria-selected=${scope === 'all'} class=${scope === 'all' ? 'on' : ''} onClick=${() => setScope('all')}>All teams</button></div>`}
       </div>
-      ${scope === 'mine' && canCreateTeams() && html`<form class="card flat row wrap team-new" onSubmit=${create}>
-        <label class="sr-only" for="team-name">New team name</label>
-        <input id="team-name" type="text" maxlength="80" placeholder="New team name, e.g. Content crew" value=${name} onInput=${(e) => setName(e.target.value)} style="flex:1;min-width:200px" />
-        <button class="btn primary" disabled=${busy || !name.trim()}><${Icon} name="plus" size=${16} />Create team</button>
+      ${scope === 'mine' && canCreateTeams() && html`<form class="card flat team-new create-team" onSubmit=${create}>
+        <h4>Create a team</h4>
+        <label class="field" for="team-name">Team name
+          <input id="team-name" type="text" maxlength="80" placeholder="e.g. Content crew" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
+        <${DirectoryPicker} picked=${picked} setPicked=${setPicked} />
+        <div class="row"><span class="small muted">${picked.length ? `You + ${picked.length} member${picked.length === 1 ? '' : 's'}` : 'Just you for now: you can add members later too.'}</span><span class="spacer"></span>
+          <button class="btn primary" disabled=${busy || !name.trim()}><${Icon} name="plus" size=${16} />Create team</button></div>
       </form>`}
       ${error ? html`<p class="notice" role="alert">${error}</p>`
         : !data ? html`<p class="muted">Loading…</p>`
@@ -106,6 +113,36 @@ function TeamLanding() {
             </div>
           </a>`)}</div>`}
     </section>
+  </div>`;
+}
+
+// Members for a new team: search the accounts by email (or name) and select them. The list comes from
+// team_member_directory(), which only answers active Admins and Super Admins (the people who can
+// create teams) and never includes blocked accounts.
+function DirectoryPicker({ picked, setPicked }) {
+  const { data, error } = useRpc('team_member_directory', {}, { poll: 0 });
+  const [q, setQ] = useState('');
+  const label = (u) => u.email || u.name || 'Account without an email';
+  const needle = q.trim().toLowerCase();
+  const chosen = new Set(picked.map(u => u.id));
+  const rows = (data || []).filter(u => !needle || [u.email, u.name].some(v => v && v.toLowerCase().includes(needle))).slice(0, 50);
+  const toggle = (u) => setPicked(chosen.has(u.id) ? picked.filter(x => x.id !== u.id) : [...picked, u]);
+  return html`<div class="field dir-picker">
+    <span id="dir-label">Members</span>
+    ${picked.length > 0 && html`<div class="row wrap picked">${picked.map(u => html`<span class="logged" key=${u.id}>${label(u)}
+      <button type="button" aria-label=${'Remove ' + label(u)} onClick=${() => toggle(u)}><${Icon} name="x" size=${13} /></button></span>`)}</div>`}
+    <label class="search"><${Icon} name="search" size=${16} />
+      <input type="search" placeholder="Search by email" aria-label="Search accounts by email" aria-describedby="dir-label" value=${q} onInput=${(e) => setQ(e.target.value)} /></label>
+    ${error ? html`<p class="notice" role="alert">${error}</p>`
+      : !data ? html`<p class="small muted">Loading accounts…</p>`
+      : rows.length === 0 ? html`<p class="small muted">${data.length ? 'No account matches “' + q.trim() + '”.' : 'No other accounts yet.'}</p>`
+      : html`<ul class="member-list" role="list" aria-label="Accounts">${rows.map(u => html`<li key=${u.id}>
+          <label class="pick-row"><input type="checkbox" checked=${chosen.has(u.id)} onChange=${() => toggle(u)} />
+            <span class="pick-avatar" aria-hidden="true">${label(u).slice(0, 1).toUpperCase()}</span>
+            <span class="pick-id"><strong>${u.email || html`<span class="muted">no email on file</span>`}</strong>
+              <span class="small muted">${u.name || ''}${u.email && !u.email_verified ? (u.name ? ' · ' : '') + 'unconfirmed email' : ''}</span></span></label>
+        </li>`)}</ul>`}
+    ${data && data.length > 50 && !needle && html`<p class="hint">Showing 50 of ${data.length}. Type to search.</p>`}
   </div>`;
 }
 
@@ -288,7 +325,7 @@ function MemberPicker({ teamId }) {
     ${error ? html`<p class="notice" role="alert">${error}</p>`
       : !data ? html`<p class="small muted">Loading accounts…</p>`
       : rows.length === 0 ? html`<p class="small muted">${data.length === 0 ? 'Everyone with an active account is already in this team.' : 'No account matches “' + q.trim() + '”.'}</p>`
-      : html`<ul class="pick-list" role="list">${rows.map(u => html`<li key=${u.id}>
+      : html`<ul class="member-list" role="list">${rows.map(u => html`<li key=${u.id}>
           <span class="pick-avatar" aria-hidden="true">${label(u).slice(0, 1).toUpperCase()}</span>
           <span class="pick-id"><strong>${label(u)}</strong>
             <span class="small muted">${u.email ? u.email : 'no email on file'}${u.email && !u.email_verified ? html` · <span title="This email hasn't been confirmed">unconfirmed</span>` : ''}</span></span>

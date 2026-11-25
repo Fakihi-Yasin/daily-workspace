@@ -1,6 +1,6 @@
 // Settings: accounts & sites, routines (versioned with effective dates), categories, timezone, backup, demo.
 import { html, useState, useEffect, useRef, useResource, api, act, bus, toast, Icon, useTheme, THEMES, downloadJson, isBrowserStorage, isCloudStorage, BROWSER_NOTE, CLOUD_NOTE, Chip, Modal, EffectPicker, Empty, fmtDay, fmtShort, addDays,
-  KIND_LABELS, KIND_PLURAL, KIND_COLOR, DAYS, DAY_NAMES, kindsFor } from './lib.js';
+  KIND_LABELS, KIND_PLURAL, KIND_COLOR, DAYS, DAY_NAMES, kindsFor, ActionsMenu } from './lib.js';
 
 const TABS = [['assets', 'Accounts & sites'], ['routines', 'Routines'], ['categories', 'Categories'], ['general', 'General'], ['backup', 'Backup'], ['demo', 'Demo']];
 
@@ -82,37 +82,6 @@ function Assets({ data }) {
 }
 
 // One "Actions" dropdown per row (keyboard: Enter/Space opens, ↑/↓ move, Esc closes).
-function ActionsMenu({ label, items }) {
-  const [open, setOpen] = useState(false);
-  const [up, setUp] = useState(false);
-  const ref = useRef();
-  const toggle = () => {
-    if (!open) { const r = ref.current.getBoundingClientRect(); setUp(window.innerHeight - r.bottom < 40 * items.length + 30 && r.top > 40 * items.length + 30); }
-    setOpen(!open);
-  };
-  useEffect(() => {
-    if (!open) return;
-    const el = ref.current;
-    el.querySelector('[role=menuitem]')?.focus();
-    const away = (e) => { if (!el.contains(e.target)) setOpen(false); };
-    const keys = (e) => {
-      const btns = [...el.querySelectorAll('[role=menuitem]')];
-      const i = btns.indexOf(document.activeElement);
-      if (e.key === 'Escape') { setOpen(false); el.querySelector('.actions-btn').focus(); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length].focus(); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); }
-    };
-    document.addEventListener('mousedown', away); el.addEventListener('keydown', keys);
-    return () => { document.removeEventListener('mousedown', away); el.removeEventListener('keydown', keys); };
-  }, [open]);
-  return html`<div class="menu" ref=${ref}>
-    <button class="btn sm actions-btn" aria-haspopup="menu" aria-expanded=${open} aria-label=${'Actions for ' + label} onClick=${toggle}>
-      Actions <${Icon} name="chevD" size=${14} /></button>
-    ${open && html`<div class=${'menu-pop actions-pop' + (up ? ' up' : '')} role="menu" aria-label=${'Actions for ' + label}>
-      ${items.map(([text, fn, tone]) => html`<button role="menuitem" class=${'item' + (tone === 'danger' ? ' danger' : '')} onClick=${() => { setOpen(false); fn(); }}>${text}</button>`)}
-    </div>`}
-  </div>`;
-}
 
 function DeleteAsset({ a, onClose }) {
   const [busy, setBusy] = useState(false);

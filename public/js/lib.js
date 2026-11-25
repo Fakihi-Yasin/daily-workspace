@@ -307,3 +307,46 @@ export function ThemeToggle() {
 export function Empty({ title, children }) {
   return html`<div class="empty"><strong>${title}</strong>${children && html`<div>${children}</div>`}</div>`;
 }
+
+// "Actions ▾" button with a small menu: items are [text, onClick, 'danger'?].
+export function ActionsMenu({ label, items }) {
+  const [open, setOpen] = useState(false);
+  const [up, setUp] = useState(false);
+  const [pos, setPos] = useState(null);
+  const ref = useRef();
+  // Positioned against the window, so a scrolling container (e.g. a wide table) never clips it.
+  const toggle = () => {
+    if (!open) {
+      const r = ref.current.querySelector('.actions-btn').getBoundingClientRect();
+      const u = window.innerHeight - r.bottom < 40 * items.length + 30 && r.top > 40 * items.length + 30;
+      setUp(u);
+      setPos(u ? { bottom: window.innerHeight - r.top + 4, right: window.innerWidth - r.right } : { top: r.bottom + 4, right: window.innerWidth - r.right });
+    }
+    setOpen(!open);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const el = ref.current;
+    el.querySelector('[role=menuitem]')?.focus({ preventScroll: true });
+    const away = (e) => { if (!el.contains(e.target)) setOpen(false); };
+    const keys = (e) => {
+      const btns = [...el.querySelectorAll('[role=menuitem]')];
+      const i = btns.indexOf(document.activeElement);
+      if (e.key === 'Escape') { setOpen(false); el.querySelector('.actions-btn').focus(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); }
+    };
+    const close = () => setOpen(false);
+    document.addEventListener('mousedown', away); el.addEventListener('keydown', keys);
+    window.addEventListener('scroll', close, true); window.addEventListener('resize', close);
+    return () => { document.removeEventListener('mousedown', away); el.removeEventListener('keydown', keys); window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); };
+  }, [open]);
+  return html`<div class="menu" ref=${ref}>
+    <button class="btn sm actions-btn" aria-haspopup="menu" aria-expanded=${open} aria-label=${'Actions for ' + label} onClick=${toggle}>
+      Actions <${Icon} name="chevD" size=${14} /></button>
+    ${open && html`<div class=${'menu-pop actions-pop' + (up ? ' up' : '')} role="menu" aria-label=${'Actions for ' + label}
+      style=${pos ? { position: 'fixed', top: pos.top != null ? pos.top + 'px' : 'auto', bottom: pos.bottom != null ? pos.bottom + 'px' : 'auto', right: pos.right + 'px', left: 'auto' } : undefined}>
+      ${items.map(([text, fn, tone]) => html`<button role="menuitem" class=${'item' + (tone === 'danger' ? ' danger' : '')} onClick=${() => { setOpen(false); fn(); }}>${text}</button>`)}
+    </div>`}
+  </div>`;
+}

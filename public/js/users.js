@@ -1,7 +1,7 @@
 // Users (Super Admin only): everyone who signed up through Auth0, their role and status.
 // The database refuses every call here from anyone but an active Super Admin; the sidebar link and
 // the route guard in app.js only keep the page out of other people's way.
-import { html, useState, Icon, Chip, Modal, Empty } from './lib.js';
+import { html, useState, Icon, Chip, Modal, Empty, ActionsMenu } from './lib.js';
 import { useRpc, change } from './teamwork.js';
 
 export const ROLES = [['user', 'User'], ['admin', 'Admin'], ['super_admin', 'Super Admin']];
@@ -47,12 +47,12 @@ export function Users() {
     const run = () => change('admin_delete_user', { p_user_id: u.user_id }, `${label(u)} was deleted`).catch(() => {});
     setConfirm({ title: 'Delete this account?', action: run, confirmLabel: 'Delete account', danger: true,
       text: html`<p><strong>${label(u)}</strong>${u.email ? ` (${u.email})` : ''} is removed from the app and from every team they’re in. Tasks they created pass to each team’s owner; tasks assigned to them become unassigned.</p>
-        <p class="muted">Their personal dashboard is kept in a private recovery copy, not shown anywhere. Their sign-in still works: if they sign in again they start over as a new User with an empty dashboard. To keep them out, use <strong>Block</strong> instead.</p>
+        <p class="muted">Their personal dashboard is kept in a private recovery copy, not shown anywhere. Their sign-in still works: if they sign in again they start over as a new account with an empty dashboard. To keep them out, use <strong>Block</strong> instead.</p>
         <p class="muted small">An account that owns a team can’t be deleted until its teams are deleted.</p>` });
   };
 
   return html`<div>
-    <header class="page-head"><h1>Users</h1><span class="muted">Everyone who signed up. New accounts start as User with their own private dashboard.</span></header>
+    <header class="page-head"><h1>Users</h1><span class="muted">Everyone who signed up. New accounts start as Admin: their own dashboard, and they can create teams.</span></header>
     <div class="tiles" style="margin-bottom:16px">
       <div class="tile"><span class="v">${data.length}</span><span class="k">Accounts</span></div>
       <div class="tile"><span class="v">${data.filter(u => u.role === 'admin').length}</span><span class="k">Admins</span></div>
@@ -80,12 +80,11 @@ export function Users() {
               ${ROLES.map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select>
           </td>
           <td><${Chip} color=${u.status === 'blocked' ? 'pink' : 'mint'} title=${u.status_changed_by ? `Changed by ${u.status_changed_by.name}, ${fmtWhen(u.status_changed_at)}` : undefined}>${u.status === 'blocked' ? 'Blocked' : 'Active'}<//></td>
-          <td class="r"><div class="row-actions">
-            <button class="btn sm" onClick=${() => setEditing(u)} aria-label=${'Edit ' + label(u)} title="Edit name and email"><${Icon} name="edit" size=${14} />Edit</button>
-            ${self ? '' : u.status === 'blocked' ? html`<button class="btn sm" onClick=${() => setStatusFor(u, 'active')}>Unblock</button>`
-              : html`<button class="btn sm" disabled=${lastSuper} title=${lastSuper ? 'The last active Super Admin can’t be blocked' : 'Turn off access, keep the account'} onClick=${() => setStatusFor(u, 'blocked')}>Block</button>`}
-            ${self ? '' : html`<button class="btn sm danger" disabled=${lastSuper} title=${lastSuper ? 'The last active Super Admin can’t be deleted' : 'Delete this account'} onClick=${() => deleteFor(u)} aria-label=${'Delete ' + label(u)}><${Icon} name="trash" size=${14} />Delete</button>`}
-          </div></td>
+          <td class="r"><${ActionsMenu} label=${label(u)} items=${[
+            ['Edit name and email', () => setEditing(u)],
+            ...(self || lastSuper ? [] : [u.status === 'blocked' ? ['Unblock', () => setStatusFor(u, 'active')] : ['Block', () => setStatusFor(u, 'blocked')]]),
+            ...(self || lastSuper ? [] : [['Delete account…', () => deleteFor(u), 'danger']]),
+          ]} /></td>
         </tr>`;
       })}</tbody>
     </table></div>`}
