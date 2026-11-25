@@ -1,5 +1,6 @@
 // End-to-end checks of the six required flows against a real server process and a real SQLite file.
 // Run: npm test
+process.env.DASH_STARTER = 'classic'; // these tests use the original publishing setup (sites, Pinterest, WhatsApp)
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');

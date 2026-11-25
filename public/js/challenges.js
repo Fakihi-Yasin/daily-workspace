@@ -38,7 +38,7 @@ function ChallengeCard({ c }) {
           : html`<button class="btn sm ghost danger" onClick=${() => setConfirm(true)}>Delete</button>`}
       </div>
     </div>
-    ${c.off_days > 0 && html`<p class="notice" style="margin-top:12px">Coding was Off ${c.off_days} day(s) during this challenge. Coding goals are not adjusted automatically; publishing goals are not affected.</p>`}
+    ${c.off_days > 0 && html`<p class="notice" style="margin-top:12px">Focus prompts were off ${c.off_days} day(s) during this challenge. Focus goals are not adjusted automatically; other goals are not affected.</p>`}
     <div style="margin-top:12px">${c.goals.map(g => html`<div class="goal">
       <div>
         <strong>${g.label}</strong>
@@ -64,8 +64,8 @@ function defaultGoal(r) {
 }
 
 const EXTRA = [
-  { key: 'coding_sessions', label: 'Coding sessions', period: 'week', target: 3 },
-  { key: 'coding_minutes', label: 'Coding minutes', period: 'week', target: 600 },
+  { key: 'coding_sessions', label: 'Focus sessions', period: 'week', target: 3 },
+  { key: 'coding_minutes', label: 'Focus minutes', period: 'week', target: 600 },
   { key: 'study_minutes', label: 'Study minutes', period: 'week', target: 120 },
   { key: 'milestones', label: 'Project milestones completed', period: 'total', target: 5 },
 ];

@@ -140,9 +140,11 @@ app have no server to enforce them, so they keep working as before, without Team
 
 ### What it does
 - **Roles** (`public.app_users`, keyed by the Auth0 user id `sub`, never by name or email):
-  - **User**: every new signup (the default role). Their own private dashboard straight away, plus
-    the teams someone adds them to. They can't create teams (migration `20261125120000_users_get_workspace.sql`).
-  - **Admin**: the personal workspace plus Team Work: creates teams and manages the ones they own.
+  - **Admin**: every new signup (the default role, migration `20261125220000_new_accounts_admin_team_member_picker.sql`).
+    Their own private dashboard plus Team Work: creates teams (picking members by email from the
+    list of active accounts) and manages the ones they own.
+  - **User**: given by a Super Admin. Their own dashboard plus the teams someone adds them to; can't
+    create teams.
   - **Super Admin**: Admin features, plus the **Users** page and a read-only **All teams** view.
     Personal dashboards stay private. Nobody, a Super Admin included, can read another account's snapshot.
 - **Blocking** applies on the account's next request to the database, including from a browser that is
@@ -197,7 +199,7 @@ app have no server to enforce them, so they keep working as before, without Team
    - In Auth0 → Applications → your SPA, add the branch URL
      `https://daily-workspace-git-daily-workspace-v3-<team>.vercel.app` to Allowed Callback URLs,
      Allowed Logout URLs and Allowed Web Origins.
-5. **Sign-ups:** every new signup gets their own empty dashboard at once (role User). Leave
+5. **Sign-ups:** every new signup gets their own empty dashboard at once (role Admin). Leave
    **Disable Sign Ups** on unless you want anyone to be able to register. If you use the optional `ALLOWED_EMAILS` Action,
    unknown emails are still refused before they can register.
 6. Production: only after Preview works. Do it in this order, all in the **Production** project's SQL
@@ -251,6 +253,15 @@ the redirect straight after signup, even if they never reach the workspace.
 
 ### Rules in short
 Members can be Users or Admins; the same rules apply. Only Admins and Super Admins can create a team.
+A team name is unique per owner (case ignored); different owners may use the same name. To add a
+member, the owner picks from the list of active accounts not yet in the team (name and email), or adds
+by verified email.
+
+**Users page actions (Super Admin):** change role, Block / Unblock, **Edit** name and email (an email
+set here counts as confirmed), and **Delete**. Delete removes the account from the app and its teams
+(tasks it created pass to the team owner; tasks assigned to it become unassigned). Its dashboard goes
+to `app_private.deleted_snapshots` for recovery from the SQL editor. Team owners can't be deleted until
+their teams are deleted, and the Auth0 login is untouched: Block is the way to keep someone out.
 
 | | Owner of the team | Member | Super Admin (not a member) | Everyone else |
 |---|---|---|---|---|

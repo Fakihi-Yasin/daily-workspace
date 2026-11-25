@@ -134,7 +134,7 @@ async function start() {
 const hasWorkspace = (a) => !!a && a.status === 'active';
 const accessKey = (auth) => `dash.v2.u.${encodeURIComponent(auth.user.id)}.access`;
 
-// Registers this account on first sign-in (as 'user') and returns its role and status. Offline, the
+// Registers this account on first sign-in (as 'admin') and returns its role and status. Offline, the
 // last known answer for this account in this browser is used so the personal dashboard still opens
 // from its local copy; the database re-checks on every sync request anyway.
 async function checkAccess(rpc, auth) {

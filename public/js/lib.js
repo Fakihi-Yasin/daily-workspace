@@ -145,13 +145,15 @@ export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const pct = (n) => (n == null ? '—' : `${Math.round(n)}%`);
 
 export const KIND_LABELS = {
-  site_iptv: 'IPTV site', site_blog: 'Blog site', site_other: 'Other site', pinterest: 'Pinterest', facebook: 'Facebook',
+  site_iptv: 'IPTV site', site_blog: 'Blog site', site_other: 'Website', pinterest: 'Pinterest', facebook: 'Facebook',
   instagram: 'Instagram', youtube: 'YouTube', other: 'Other',
 };
 export const KIND_PLURAL = {
-  site_iptv: 'IPTV sites', site_blog: 'Blog sites', site_other: 'Other sites', pinterest: 'Pinterest accounts', facebook: 'Facebook pages',
-  instagram: 'Instagram accounts', youtube: 'YouTube channels', other: 'Others',
+  site_iptv: 'IPTV sites', site_blog: 'Blog sites', site_other: 'Websites', pinterest: 'Pinterest accounts', facebook: 'Facebook pages',
+  instagram: 'Instagram accounts', youtube: 'YouTube channels', other: 'Other',
 };
+// Types offered when adding or picking: "IPTV site" only for accounts that already use it.
+export const kindsFor = (assets, keep) => Object.keys(KIND_LABELS).filter(k => k !== 'site_iptv' || k === keep || (assets || []).some(a => a.kind === 'site_iptv'));
 export const KIND_COLOR = { site_iptv: 'blue', site_blog: 'mint', site_other: 'sky', pinterest: 'pink', facebook: 'sky', instagram: 'yellow', youtube: 'pink', other: 'ink' };
 
 // ---------- primitives ----------
@@ -175,6 +177,7 @@ const ICONS = {
   logout: 'M15 4h4v16h-4M10 17l5-5-5-5M15 12H3',
   team: 'M9 11a4 4 0 100-8 4 4 0 000 8zM2 21v-1a6 6 0 0112 0v1M16 3.5a4 4 0 010 7.5M22 21v-1a6 6 0 00-4-5.6',
   users: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM12 12a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 16.5c1-1.5 2.4-2 4-2s3 .5 4 2',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   search: 'M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-5-5', edit: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4', clock: 'M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 2', note: 'M5 4h14v16H5zM9 9h6M9 13h6',
 };
 export const Icon = ({ name, size = 18 }) => html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${ICONS[name] || ''} /></svg>`;
@@ -303,4 +306,47 @@ export function ThemeToggle() {
 
 export function Empty({ title, children }) {
   return html`<div class="empty"><strong>${title}</strong>${children && html`<div>${children}</div>`}</div>`;
+}
+
+// "Actions ▾" button with a small menu: items are [text, onClick, 'danger'?].
+export function ActionsMenu({ label, items }) {
+  const [open, setOpen] = useState(false);
+  const [up, setUp] = useState(false);
+  const [pos, setPos] = useState(null);
+  const ref = useRef();
+  // Positioned against the window, so a scrolling container (e.g. a wide table) never clips it.
+  const toggle = () => {
+    if (!open) {
+      const r = ref.current.querySelector('.actions-btn').getBoundingClientRect();
+      const u = window.innerHeight - r.bottom < 40 * items.length + 30 && r.top > 40 * items.length + 30;
+      setUp(u);
+      setPos(u ? { bottom: window.innerHeight - r.top + 4, right: window.innerWidth - r.right } : { top: r.bottom + 4, right: window.innerWidth - r.right });
+    }
+    setOpen(!open);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const el = ref.current;
+    el.querySelector('[role=menuitem]')?.focus({ preventScroll: true });
+    const away = (e) => { if (!el.contains(e.target)) setOpen(false); };
+    const keys = (e) => {
+      const btns = [...el.querySelectorAll('[role=menuitem]')];
+      const i = btns.indexOf(document.activeElement);
+      if (e.key === 'Escape') { setOpen(false); el.querySelector('.actions-btn').focus(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); }
+    };
+    const close = () => setOpen(false);
+    document.addEventListener('mousedown', away); el.addEventListener('keydown', keys);
+    window.addEventListener('scroll', close, true); window.addEventListener('resize', close);
+    return () => { document.removeEventListener('mousedown', away); el.removeEventListener('keydown', keys); window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); };
+  }, [open]);
+  return html`<div class="menu" ref=${ref}>
+    <button class="btn sm actions-btn" aria-haspopup="menu" aria-expanded=${open} aria-label=${'Actions for ' + label} onClick=${toggle}>
+      Actions <${Icon} name="chevD" size=${14} /></button>
+    ${open && html`<div class=${'menu-pop actions-pop' + (up ? ' up' : '')} role="menu" aria-label=${'Actions for ' + label}
+      style=${pos ? { position: 'fixed', top: pos.top != null ? pos.top + 'px' : 'auto', bottom: pos.bottom != null ? pos.bottom + 'px' : 'auto', right: pos.right + 'px', left: 'auto' } : undefined}>
+      ${items.map(([text, fn, tone]) => html`<button role="menuitem" class=${'item' + (tone === 'danger' ? ' danger' : '')} onClick=${() => { setOpen(false); fn(); }}>${text}</button>`)}
+    </div>`}
+  </div>`;
 }

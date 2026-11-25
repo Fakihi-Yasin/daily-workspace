@@ -93,17 +93,17 @@ export function FocusPanel({ today, tz }) {
   if (mode === 'start') return html`<div class="stack" ref=${ref}>${result}<${StartForm} key=${prefill ? prefill.key : 'new'} prefill=${prefill}
     onCancel=${() => { setMode(null); setPrefill(null); }} onStarted=${() => { setMode(null); setEnded(null); setPrefill(null); }} /></div>`;
   if (mode === 'off' || mode === 'stop') {
-    return html`<div class="stack">${result}<section class="card fp" aria-label="Pause coding">
-      <div class="fp-head"><span class="label">${mode === 'stop' ? 'Stop coding' : 'Off'}</span><span class="spacer"></span>
+    return html`<div class="stack">${result}<section class="card fp" aria-label="Pause focus prompts">
+      <div class="fp-head"><span class="label">${mode === 'stop' ? 'Stop for today' : 'Off'}</span><span class="spacer"></span>
         <button class="btn sm ghost" onClick=${() => setMode(null)}>${mode === 'stop' ? 'No, just end the session' : 'Cancel'}</button></div>
-      <p class="small muted">Pauses only the coding prompt. Your routines stay available.</p>
+      <p class="small muted">Pauses only the focus prompt. Your routines stay available.</p>
       <${OffChooser} today=${today} onDone=${() => setMode(null)} />
     </section></div>`;
   }
   if (off) {
-    return html`<div class="stack">${result}<section class="card fp fp-off" aria-label="Coding paused">
+    return html`<div class="stack">${result}<section class="card fp fp-off" aria-label="Focus prompts paused">
       <div class="fp-row">
-        <div class="fp-main"><span class="label"><${Icon} name="moon" size=${13} /> Coding off</span>
+        <div class="fp-main"><span class="label"><${Icon} name="moon" size=${13} /> Focus off</span>
           <div class="fp-title">Paused until ${fmtDateTime(off.until, tz)}</div></div>
         <div class="fp-actions">
           <button class="btn sm" onClick=${() => act('POST', '/api/off/extend', { days: 1 })}>+1 day</button>
@@ -221,7 +221,7 @@ function Expired({ s, onFinish, onOther, onStop }) {
       <${DurationForm} label="Continue" onSubmit=${ext} />
       <span class="spacer"></span>
       <button class="btn sm" onClick=${onOther}>Pick another project</button>
-      <button class="btn sm" onClick=${onStop}>Stop coding</button>
+      <button class="btn sm" onClick=${onStop}>Stop for today</button>
       <button class="btn sm ghost" onClick=${onFinish}>Just end it</button>
     </div>
   </section>`;
@@ -231,7 +231,7 @@ function OffChooser({ today, onDone }) {
   const [custom, setCustom] = useState(false);
   const [d, setD] = useState(addDays(today, 3));
   const [t, setT] = useState('08:00');
-  const go = async (body) => { await act('POST', '/api/off', body); toast({ msg: 'Coding paused' }); onDone && onDone(); };
+  const go = async (body) => { await act('POST', '/api/off', body); toast({ msg: 'Focus prompts paused' }); onDone && onDone(); };
   return html`<div style="margin-top:10px">
     <div class="row wrap">
       <button class="btn sm" onClick=${() => go({ preset: 'tomorrow' })}>Until tomorrow</button>
@@ -241,7 +241,7 @@ function OffChooser({ today, onDone }) {
     ${custom && html`<form class="row wrap" style="margin-top:10px" onSubmit=${(e) => { e.preventDefault(); go({ preset: 'custom', until_date: d, until_time: t }); }}>
       <input type="date" min=${today} value=${d} onInput=${(e) => setD(e.target.value)} aria-label="Pause end (date)" style="width:auto" />
       <input type="time" value=${t} onInput=${(e) => setT(e.target.value)} aria-label="Pause end (time)" style="width:auto" />
-      <button class="btn sm primary">Pause coding</button>
+      <button class="btn sm primary">Pause focus prompts</button>
     </form>`}
   </div>`;
 }

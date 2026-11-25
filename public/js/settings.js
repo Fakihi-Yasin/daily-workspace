@@ -1,6 +1,6 @@
 // Settings: accounts & sites, routines (versioned with effective dates), categories, timezone, backup, demo.
 import { html, useState, useEffect, useRef, useResource, api, act, bus, toast, Icon, useTheme, THEMES, downloadJson, isBrowserStorage, isCloudStorage, BROWSER_NOTE, CLOUD_NOTE, Chip, Modal, EffectPicker, Empty, fmtDay, fmtShort, addDays,
-  KIND_LABELS, KIND_PLURAL, KIND_COLOR, DAYS, DAY_NAMES } from './lib.js';
+  KIND_LABELS, KIND_PLURAL, KIND_COLOR, DAYS, DAY_NAMES, kindsFor, ActionsMenu } from './lib.js';
 
 const TABS = [['assets', 'Accounts & sites'], ['routines', 'Routines'], ['categories', 'Categories'], ['general', 'General'], ['backup', 'Backup'], ['demo', 'Demo']];
 
@@ -30,7 +30,7 @@ const STATUS_LABEL = { active: 'Active', paused: 'Paused', archived: 'Archived',
 const STATUS_COLOR = { active: 'mint', paused: 'yellow', archived: 'ink', pending: 'sky' };
 
 function Assets({ data }) {
-  const [kind, setKind] = useState('pinterest');
+  const [kind, setKind] = useState('site_other');
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [from, setFrom] = useState(addDays(data.today, 1));
@@ -43,21 +43,21 @@ function Assets({ data }) {
     toast({ msg: `${name} added · active ${r.from_date === data.today ? 'from today' : 'from ' + fmtShort(r.from_date)}` });
     setName(''); setUrl('');
   };
-  const kinds = Object.keys(KIND_LABELS);
+  const kinds = kindsFor(data.assets);
   const grouped = kinds.map(k => [k, data.assets.filter(a => a.kind === k)]).filter(([, l]) => l.length);
   return html`<div class="stack">
     <form class="card" onSubmit=${add}>
       <h3 style="margin-bottom:12px">Add a site, account or page</h3>
       <div class="row wrap" style="align-items:flex-end">
         <label class="field" style="width:190px">Type<select value=${kind} onChange=${(e) => setKind(e.target.value)}>${kinds.map(k => html`<option value=${k}>${KIND_LABELS[k]}</option>`)}</select></label>
-        <label class="field" style="flex:1;min-width:180px">Name<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} placeholder="e.g. Canada, Home Decor…" /></label>
+        <label class="field" style="flex:1;min-width:180px">Name<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} placeholder="e.g. Company website, Support inbox…" /></label>
         <label class="field" style="flex:1;min-width:200px">Link (optional)<input type="url" value=${url} onInput=${(e) => setUrl(e.target.value)} placeholder="https://" /></label>
       </div>
       <div style="margin-top:12px"><${EffectPicker} value=${from} onChange=${setFrom} today=${data.today}
         hint="Routines covering this type will include it from this date." /></div>
       <div class="form-actions"><button class="btn primary"><${Icon} name="plus" size=${16} />Add</button></div>
     </form>
-    ${grouped.length === 0 && html`<${Empty} title="No sites or accounts yet">Start with your 4 sites, your Pinterest accounts and your Facebook / Instagram pages.</${Empty}>`}
+    ${grouped.length === 0 && html`<${Empty} title="No sites or accounts yet">Add the websites, social pages and channels your routines work on, e.g. your company website or your Instagram account.</${Empty}>`}
     ${grouped.map(([k, list]) => html`<section>
       <div class="section-head"><h3>${KIND_PLURAL[k]}</h3><span class="muted small">${list.filter(a => a.status === 'active').length} active · ${list.length} total</span></div>
       <div class="list">${list.map(a => html`<div class="list-row" key=${a.id}>
@@ -75,44 +75,13 @@ function Assets({ data }) {
         </div>
       </div>`)}</div>
     </section>`)}
-    ${edit && html`<${EditAsset} a=${edit} onClose=${() => setEdit(null)} onPause=${() => { const a = edit; setEdit(null); setStatusFor(a); }} />`}
+    ${edit && html`<${EditAsset} a=${edit} assets=${data.assets} onClose=${() => setEdit(null)} onPause=${() => { const a = edit; setEdit(null); setStatusFor(a); }} />`}
     ${statusFor && html`<${AssetStatus} a=${statusFor} today=${data.today} onClose=${() => setStatusFor(null)} />`}
     ${del && html`<${DeleteAsset} a=${del} onClose=${() => setDel(null)} />`}
   </div>`;
 }
 
 // One "Actions" dropdown per row (keyboard: Enter/Space opens, ↑/↓ move, Esc closes).
-function ActionsMenu({ label, items }) {
-  const [open, setOpen] = useState(false);
-  const [up, setUp] = useState(false);
-  const ref = useRef();
-  const toggle = () => {
-    if (!open) { const r = ref.current.getBoundingClientRect(); setUp(window.innerHeight - r.bottom < 40 * items.length + 30 && r.top > 40 * items.length + 30); }
-    setOpen(!open);
-  };
-  useEffect(() => {
-    if (!open) return;
-    const el = ref.current;
-    el.querySelector('[role=menuitem]')?.focus();
-    const away = (e) => { if (!el.contains(e.target)) setOpen(false); };
-    const keys = (e) => {
-      const btns = [...el.querySelectorAll('[role=menuitem]')];
-      const i = btns.indexOf(document.activeElement);
-      if (e.key === 'Escape') { setOpen(false); el.querySelector('.actions-btn').focus(); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length].focus(); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); }
-    };
-    document.addEventListener('mousedown', away); el.addEventListener('keydown', keys);
-    return () => { document.removeEventListener('mousedown', away); el.removeEventListener('keydown', keys); };
-  }, [open]);
-  return html`<div class="menu" ref=${ref}>
-    <button class="btn sm actions-btn" aria-haspopup="menu" aria-expanded=${open} aria-label=${'Actions for ' + label} onClick=${toggle}>
-      Actions <${Icon} name="chevD" size=${14} /></button>
-    ${open && html`<div class=${'menu-pop actions-pop' + (up ? ' up' : '')} role="menu" aria-label=${'Actions for ' + label}>
-      ${items.map(([text, fn, tone]) => html`<button role="menuitem" class=${'item' + (tone === 'danger' ? ' danger' : '')} onClick=${() => { setOpen(false); fn(); }}>${text}</button>`)}
-    </div>`}
-  </div>`;
-}
 
 function DeleteAsset({ a, onClose }) {
   const [busy, setBusy] = useState(false);
@@ -141,7 +110,7 @@ function DeleteAsset({ a, onClose }) {
   </${Modal}>`;
 }
 
-function EditAsset({ a, onClose, onPause }) {
+function EditAsset({ a, assets, onClose, onPause }) {
   const [name, setName] = useState(a.name);
   const [kind, setKind] = useState(a.kind);
   const [url, setUrl] = useState(a.url || '');
@@ -166,7 +135,7 @@ function EditAsset({ a, onClose, onPause }) {
     <form class="stack" onSubmit=${save}>
       <label class="field">Name<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} /></label>
       <label class="field">Type<select value=${kind} onChange=${(e) => { setKind(e.target.value); setConflict(null); }}>
-        ${Object.keys(KIND_LABELS).map(k => html`<option value=${k}>${KIND_LABELS[k]}</option>`)}</select></label>
+        ${kindsFor(assets, a.kind).map(k => html`<option value=${k}>${KIND_LABELS[k]}</option>`)}</select></label>
       <label class="field">Link<input type="url" value=${url} onInput=${(e) => { setUrl(e.target.value); setConflict(null); }} placeholder="https://" /></label>
       <label class="field">Notes<textarea value=${notes} onInput=${(e) => setNotes(e.target.value)} /></label>
       ${moving
@@ -270,7 +239,7 @@ function RoutineEditor({ r, data, onClose }) {
         <p class="hint" style="margin-top:6px">${type === 'counter' ? 'A numeric target (per account or shared) with numbered boxes.' : type === 'social' ? 'Slots (Morning, Evening…): video produced + one publication per destination.' : 'A one-click task, optionally split into small steps.'}</p></fieldset>`}
       <div class="grid2">
         <label class="field">Name<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} /></label>
-        <label class="field">Score category<input type="text" list="cat-list" value=${category} onInput=${(e) => setCategory(e.target.value)} placeholder="e.g. Pinterest" />
+        <label class="field">Score category<input type="text" list="cat-list" value=${category} onInput=${(e) => setCategory(e.target.value)} placeholder="e.g. Marketing" />
           <span class="hint">Tasks in the same category form a single score.</span>
           <datalist id="cat-list">${cats.map(c => html`<option value=${c} />`)}</datalist></label>
       </div>
@@ -300,12 +269,12 @@ function CounterFields({ cfg, set, assets }) {
   return html`<div class="card flat stack">
     <div class="row wrap" style="align-items:flex-end">
       <label class="field">What is counted<select value=${cfg.unit} onChange=${(e) => set({ unit: e.target.value })}>${Object.entries(UNIT_LABEL).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></label>
-      <label class="field" style="flex:1">Display label<input type="text" value=${cfg.unit_label || ''} onInput=${(e) => set({ unit_label: e.target.value })} placeholder="articles published, Pins…" /></label>
+      <label class="field" style="flex:1">Display label<input type="text" value=${cfg.unit_label || ''} onInput=${(e) => set({ unit_label: e.target.value })} placeholder="calls made, tickets answered…" /></label>
     </div>
     <fieldset><legend>Applies to</legend>
       <div class="seg">${[['kinds', 'All accounts of a type'], ['list', 'A selection'], ['none', 'No account']].map(([k, l]) => html`<button type="button" class=${cfg.asset_scope === k ? 'on' : ''} onClick=${() => set({ asset_scope: k })}>${l}</button>`)}</div>
       <div style="margin-top:8px">
-        ${cfg.asset_scope === 'kinds' && html`${pickKinds(cfg.asset_kinds || [], (v) => set({ asset_kinds: v }), Object.keys(KIND_LABELS))}<p class="hint" style="margin-top:6px">A new account of this type will be included from its activation date.</p>`}
+        ${cfg.asset_scope === 'kinds' && html`${pickKinds(cfg.asset_kinds || [], (v) => set({ asset_kinds: v }), kindsFor(assets).concat((cfg.asset_kinds || []).filter(k => !kindsFor(assets).includes(k))))}<p class="hint" style="margin-top:6px">A new account of this type will be included from its activation date.</p>`}
         ${cfg.asset_scope === 'list' && pickAssets(cfg.asset_ids || [], (v) => set({ asset_ids: v }), assets)}
       </div>
     </fieldset>
@@ -368,7 +337,7 @@ function Categories({ data }) {
   const [name, setName] = useState('');
   const [color, setColor] = useState('sky');
   return html`<div class="stack">
-    <p class="muted">Project categories. Those marked “coding” appear in the “What are you working on?” prompt.</p>
+    <p class="muted">Project categories. Those marked “Focus” appear in the “What are you working on?” prompt.</p>
     <div class="list">${data.categories.map(c => html`<${CatRow} key=${c.id} c=${c} />`)}</div>
     <form class="card row wrap" style="align-items:flex-end" onSubmit=${async (e) => { e.preventDefault(); await act('POST', '/api/categories', { name, color, coding: true }); setName(''); toast({ msg: 'Category added' }); }}>
       <label class="field" style="flex:1;min-width:200px">New category<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} placeholder="e.g. Mobile apps" /></label>
@@ -384,7 +353,7 @@ function CatRow({ c }) {
     <${Chip} color=${c.color}>●</${Chip}>
     <input type="text" value=${name} onInput=${(e) => setName(e.target.value)} onBlur=${() => name !== c.name && save({ name })} aria-label="Category name" style="max-width:280px" />
     <select value=${c.color} onChange=${(e) => save({ color: e.target.value })} aria-label="Color" style="width:auto">${COLORS.map(x => html`<option value=${x}>${x}</option>`)}</select>
-    <label class="checkline"><input type="checkbox" checked=${!!c.coding} onChange=${(e) => save({ coding: e.target.checked })} />Coding</label>
+    <label class="checkline"><input type="checkbox" checked=${!!c.coding} onChange=${(e) => save({ coding: e.target.checked })} />Focus</label>
   </div>`;
 }
 
@@ -404,7 +373,7 @@ function General({ data }) {
     <h3>Timezone</h3>
     <label class="field">Days start at midnight in this timezone<input type="text" list="tz-list" value=${tz} onInput=${(e) => setTz(e.target.value)} />
       <datalist id="tz-list">${zones.map(z => html`<option value=${z} />`)}</datalist></label>
-    <p class="hint">Default: Africa/Casablanca. Today in the app: ${fmtDay(data.today)}.</p>
+    <p class="hint">New accounts start in the time zone of the device they were created on. Today in the app: ${fmtDay(data.today)}.</p>
     <div class="form-actions"><button class="btn primary">Save</button></div>
   </form>
   </div>`;
@@ -484,7 +453,7 @@ function Backup() {
     } finally { setBusy(false); }
   };
   const rows = [['assets', 'Sites & accounts'], ['routines', 'Routines'], ['tasks', 'Tasks'], ['records', 'Records'], ['projects', 'Projects'],
-    ['milestones', 'Milestones'], ['sessions', 'Coding sessions'], ['videos', 'Videos'], ['courses', 'Courses'], ['challenges', 'Challenges']];
+    ['milestones', 'Milestones'], ['sessions', 'Focus sessions'], ['videos', 'Videos'], ['courses', 'Courses'], ['challenges', 'Challenges']];
   return html`<div class="stack" style="max-width:760px">
     <${StorageNote} />
     <div class="card stack">

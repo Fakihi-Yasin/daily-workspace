@@ -1,5 +1,6 @@
 // Browser-build storage: per-user isolation, persistence, localhost → browser import, two tabs.
 // Runs the real in-browser backend (sql.js + lib/api.js) in Node with an in-memory localStorage.
+process.env.DASH_STARTER = 'classic'; // these tests use the original publishing setup (sites, Pinterest, WhatsApp)
 const { test, before } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

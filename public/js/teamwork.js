@@ -71,11 +71,12 @@ function TeamLanding() {
   const { data, error } = useRpc('team_list', { p_scope: scope });
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  // Members are added afterwards, from the team's People tab (Add member).
   const create = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
     setBusy(true);
-    try { const r = await change('team_create', { p_name: name.trim() }, 'Team created'); setName(''); location.hash = '#/teams/' + r.id; }
+    try { const r = await change('team_create', { p_name: name.trim() }, 'Team created · add members in People'); setName(''); location.hash = '#/teams/' + r.id + '?tab=people'; }
     catch { /* toast shown */ } finally { setBusy(false); }
   };
   return html`<div>
@@ -115,7 +116,8 @@ const TABS = [['board', 'Board'], ['people', 'People'], ['scores', 'Daily score'
 function TeamPage({ id }) {
   const { data, error } = useRpc('team_get', { p_team_id: id });
   const { data: boot } = useResource('/api/bootstrap');
-  const [tab, setTab] = useState('board');
+  // "#/teams/<id>?tab=people" opens a tab directly (used right after creating a team).
+  const [tab, setTab] = useState(() => { const t = (/[?&]tab=(\w+)/.exec(location.hash) || [])[1]; return TABS.some(x => x[0] === t) ? t : 'board'; });
   if (error) return html`<div><p><a href="#/teams" class="link-btn">← Team Work</a></p>
     <${Empty} title=${/not found/i.test(error) ? 'Team not found' : 'Can’t open this team'}>${/not found/i.test(error) ? 'It was deleted, or you’re not a member of it.' : error}<//></div>`;
   if (!data || !boot) return html`<p class="muted">Loading…</p>`;
@@ -266,30 +268,49 @@ function TaskModal({ ctx, task, onClose }) {
   <//>`;
 }
 
+// Add a member: search the accounts that aren't in the team yet and pick one (team owner only;
+// the database refuses everyone else and never lists blocked accounts).
+function MemberPicker({ teamId }) {
+  const { data, error } = useRpc('team_member_candidates', { p_team_id: teamId }, { poll: 0 });
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(null);
+  const label = (u) => u.email || u.name || 'Account without an email';
+  const needle = q.trim().toLowerCase();
+  // Search runs over every account's email (not only the rows in view); the list shows 4 at a time and
+  // scrolls inside itself.
+  const rows = (data || []).filter(u => !needle || (u.email && u.email.toLowerCase().includes(needle)));
+  const add = async (u) => {
+    setBusy(u.id);
+    try { await change('team_add_member_id', { p_team_id: teamId, p_user_id: u.id }, `${label(u)} added to the team`); setQ(''); }
+    catch { /* toast shown */ } finally { setBusy(null); }
+  };
+  return html`<section class="card flat add-member" aria-labelledby="add-member-h">
+    <div class="row"><h4 id="add-member-h">Add a member</h4><span class="spacer"></span>
+      ${data && html`<span class="small muted" aria-live="polite">${needle ? `${rows.length} match${rows.length === 1 ? '' : 'es'} · ` : ''}${data.length} account${data.length === 1 ? '' : 's'} not in this team</span>`}</div>
+    <label class="search add-member-search"><${Icon} name="search" size=${16} />
+      <input type="search" inputmode="email" autocomplete="off" placeholder="Search by email" aria-label="Search accounts by email" value=${q} onInput=${(e) => setQ(e.target.value)} /></label>
+    ${error ? html`<p class="notice" role="alert">${error}</p>`
+      : !data ? html`<p class="small muted">Loading accounts…</p>`
+      : rows.length === 0 ? html`<p class="small muted">${data.length === 0 ? 'Everyone with an active account is already in this team.' : 'No email matches “' + q.trim() + '”.'}</p>`
+      : html`<ul class="member-list member-list-4" role="list" aria-label="Accounts" tabindex="0">${rows.map(u => html`<li key=${u.id}>
+          <span class="pick-avatar" aria-hidden="true">${label(u).slice(0, 1).toUpperCase()}</span>
+          <span class="pick-id"><strong>${u.email || html`<span class="muted">no email on file</span>`}</strong>
+            <span class="small muted">${u.name || ''}${u.email && !u.email_verified ? html`${u.name ? ' · ' : ''}<span title="This email hasn't been confirmed">unconfirmed</span>` : ''}</span></span>
+          <button class="btn sm primary" disabled=${busy === u.id} onClick=${() => add(u)} aria-label=${'Add ' + label(u)}><${Icon} name="plus" size=${14} />Add</button>
+        </li>`)}</ul>`}
+    <p class="hint">Adding someone gives them this team only. It doesn’t change their role.</p>
+  </section>`;
+}
+
 // ---------- people: membership and who is doing what ----------
 function People({ ctx }) {
-  const [email, setEmail] = useState('');
-  const [busy, setBusy] = useState(false);
   const teamId = ctx.team.team.id;
-  const add = async (e) => {
-    e.preventDefault();
-    setBusy(true);
-    try { const p = await change('team_add_member', { p_team_id: teamId, p_email: email.trim() }); toast({ msg: `${p.name} added to the team` }); setEmail(''); }
-    catch { /* toast shown */ } finally { setBusy(false); }
-  };
   const remove = async (m) => {
     if (!confirm(`Remove ${m.name} from this team? They lose access to it at once; their tasks here become unassigned.`)) return;
     try { await change('team_remove_member', { p_team_id: teamId, p_user_id: m.id }, 'Removed'); } catch { /* toast shown */ }
   };
   return html`<div>
-    ${ctx.owner && html`<form class="card flat add-member" onSubmit=${add}>
-      <label for="add-member-email">Add a member by email</label>
-      <div class="add-member-row">
-        <input id="add-member-email" type="email" required autocomplete="off" placeholder="name@example.com" value=${email} onInput=${(e) => setEmail(e.target.value)} />
-        <button class="btn primary" disabled=${busy || !email.trim()}><${Icon} name="plus" size=${16} />Add member</button>
-      </div>
-      <p class="hint">Use the email they signed up with. They need an account here with a confirmed email. Adding them doesn’t change their role.</p>
-    </form>`}
+    ${ctx.owner && html`<${MemberPicker} teamId=${teamId} />`}
     <div class="cards">
       ${ctx.team.members.map(m => {
         const mine = ctx.team.tasks.filter(k => k.assignee && k.assignee.id === m.id);
