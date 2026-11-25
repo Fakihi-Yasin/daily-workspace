@@ -284,3 +284,56 @@ TEST ONLY). Build with `SUPABASE_URL=http://localhost:54321 SUPABASE_PUBLISHABLE
 then serve it with `node scripts/preview.js dist-test 4323`. Open
 `http://localhost:54321/__bootstrap?user=<name>` to make the test account `test|<name>` the first
 Super Admin. `npm test` includes `test/roles-teams.test.js`, which runs the same SQL.
+
+## PC Work Time & Activity Details (desktop agent)
+
+Counts active computer time even when the dashboard is closed, and stores **daily totals only** in the
+account (active seconds; Work and Personal seconds when Activity Details are on), separately from Focus
+Sessions. Migrations: `20261126000000_pc_work_time.sql`, `20261126010000_pc_work_split_and_delete.sql`.
+Agent source: `agent/` (served at `/pc-agent/`). One Python file (`dw-pc-time.py`, standard library only)
+shares the counting and sync logic; small adapters handle each system.
+
+### Privacy rules (all systems)
+- Never: screenshots or screen recording; keystrokes, typed text, passwords, messages, clipboard; window
+  or page titles; full URLs. Idle time comes only from the OS idle timer (time since last input).
+- Activity Details are **off by default** (`dw-pc-time details on`). When on, the computer keeps only the
+  foreground app's name, the active tab's domain (optional browser extension) and the time — in a local
+  SQLite file (30 days) — shown at `http://127.0.0.1:47613` (`dw-pc-time open`): daily timeline,
+  Work / Personal / Uncategorized, exclusion list, Delete history. Only the daily Work / Personal totals
+  are synced. Settings → PC Work Time → **Delete synced history** removes the account's totals.
+- The local page and the extension endpoint listen on 127.0.0.1 only, check the Host header, and need a
+  token (one-time link from `dw-pc-time open`; extension token from `dw-pc-time extension-token`).
+
+### Install (Settings → PC Work Time → Connect this PC shows the command with your code)
+| System | Command | Starts at login via | Needs |
+|---|---|---|---|
+| Ubuntu / Linux | `curl -fsSL <dashboard>/pc-agent/install.sh \| bash -s -- CODE` | systemd user service | python3, gdbus |
+| macOS | `curl -fsSL <dashboard>/pc-agent/install-macos.sh \| bash -s -- CODE` | LaunchAgent | python3 (Command Line Tools) |
+| Windows 10/11 | PowerShell: `$env:DW_CODE='CODE'; irm <dashboard>/pc-agent/install-windows.ps1 \| iex` | HKCU `Run` key (pythonw) | Python 3.9+ |
+
+Commands: `dw-pc-time status | pause | resume | idle N | details on|off | domains on|off | open |
+autostart on|off | browser-extension | gnome-extension | sync`. Linux removal: `<dashboard>/pc-agent/uninstall.sh`;
+macOS / Windows: `dw-pc-time autostart off`, then delete the agent folder.
+
+### How each system is read
+| | Idle (OS idle timer) | Screen locked | Foreground app (Activity Details) |
+|---|---|---|---|
+| Linux GNOME | Mutter IdleMonitor (D-Bus) | GNOME ScreenSaver / logind LockedHint | Wayland: only with the bundled GNOME Shell extension (`dw-pc-time gnome-extension`, then log out/in); X11: `xprop` WM_CLASS |
+| Linux KDE / other | freedesktop ScreenSaver, `xprintidle` | freedesktop ScreenSaver | X11 only |
+| Windows | `GetLastInputInfo` | input desktop can't be switched to | `GetForegroundWindow` → process name |
+| macOS | IOHIDSystem `HIDIdleTime` | `CGSSessionScreenIsLocked` (ioreg) | `lsappinfo front` |
+Sleep / hibernate on every system: a gap longer than 30 s between checks is never counted.
+
+### Tested (25–26 Nov 2026)
+- **Ubuntu 24.04, GNOME 46, Wayland — tested on a real machine:** install command from the dashboard,
+  systemd service enabled for the graphical session, counting, idle setting from the dashboard, Pause
+  (computer → server 47 s) and Resume (dashboard → computer), **screen lock stops counting** (seen twice,
+  the screen locked by itself), offline totals kept and uploaded when the server returned, disconnect
+  refuses the key, uninstall. Local Activity Details page, token and Host checks. The browser
+  extension's code was run against the live agent with a stand-in for the browser API (Chrome 157 no
+  longer loads unpacked extensions from the command line), so it is **not tested inside a browser**.
+- **Sleep / suspend:** covered by unit tests only (not suspended for real).
+- **GNOME Shell extension (Wayland foreground app):** written for GNOME 45–48, **not loaded or tested**
+  (needs a logout). Without it, apps show as "Unknown app" on Wayland.
+- **Windows and macOS: not tested** on a real machine (no such machine available). The adapters use
+  documented system APIs, but treat them as untested until run once.

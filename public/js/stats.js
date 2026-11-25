@@ -2,6 +2,7 @@
 import { html, useState, useResource, Bar, Chip, Modal, Empty, Icon, Ring, fmtDay, fmtShort, fmtDur, addDays, pct, KIND_PLURAL, KIND_LABELS } from './lib.js';
 import { CompletedModal } from './history.js';
 import { TeamCountTiles } from './teamwork.js';
+import { PcTimeTile } from './pctime.js';
 
 function rangeFor(kind, today, custom) {
   if (kind === 'day') return [today, today];
@@ -60,6 +61,7 @@ export function Stats() {
         ${tile(a.videos, a.videos, 'Videos produced')}
         ${tile(a.publications || has('facebook', 'instagram'), a.publications, 'Social posts published')}
         ${tile(a.youtube, a.youtube, 'YouTube videos published')}
+        <${PcTimeTile} from=${data.from} to=${data.to} />
         <div class="tile"><span class="v">${fmtDur(data.coding.total_sec)}</span><span class="k">Focus (${data.coding.sessions} session${data.coding.sessions > 1 ? 's' : ''})</span></div>
         <div class="tile"><span class="v">${fmtDur(data.study.total_min * 60)}</span><span class="k">Study</span></div>
       </div>
