@@ -205,7 +205,7 @@ function MyTasks({ ctx }) {
       <label for="add-task-input" class="add-task-label">Add a task${ctx.isToday ? '' : ` for ${fmtShort(ctx.data.date)}`}</label>
       <div class="add-task-row">
         <${AutoGrow} id="add-task-input" value=${title} onInput=${setTitle} onSave=${() => add()} autofocus=${false} enterkeyhint="done"
-          label=${'Add a task' + (ctx.isToday ? '' : ` for ${fmtShort(ctx.data.date)}`)} placeholder=${ctx.isToday ? 'Task title, e.g. Fix DMCA' : 'Task title'} />
+          label=${'Add a task' + (ctx.isToday ? '' : ` for ${fmtShort(ctx.data.date)}`)} placeholder=${ctx.isToday ? 'Task title, e.g. Send the weekly report' : 'Task title'} />
         <button class="btn primary" disabled=${!title.trim()}><${Icon} name="plus" size=${15} />Add task</button>
       </div>
     </form>
@@ -451,13 +451,13 @@ function nextStep(ctx, t) {
   const a = ctx.assets;
   if (t.status !== 'open' || t.unit === 'youtube') return null;
   if (t.type === 'counter') {
-    if (!t.asset_id) {
+    if (!t.asset_id && (t.meta.asset_ids || []).length) {
       const done = t.records.filter(r => r.kind === t.unit).length;
       if (done >= t.target) return null;
       return { what: `${t.label}`, detail: `${t.meta.unit_label || 'Unit'} ${done + 1}/${t.target} — choose the site`, shared: true };
     }
     for (let i = 1; i <= t.target; i++) {
-      if (!isOn(ctx, t, t.unit, i, t.asset_id)) return { what: t.label, detail: `${unitWord(t)} ${i}/${t.target}`, run: { kind: t.unit, idx: i, asset: t.asset_id }, btn: `Check ${unitWord(t).toLowerCase()} ${i}` };
+      if (!isOn(ctx, t, t.unit, i, t.asset_id || null)) return { what: t.label, detail: `${unitWord(t)} ${i}/${t.target}`, run: { kind: t.unit, idx: i, asset: t.asset_id }, btn: `Check ${unitWord(t).toLowerCase()} ${i}` };
     }
     return null;
   }
@@ -472,7 +472,9 @@ function nextStep(ctx, t) {
   for (let i = 0; i < list.length; i++) if (!isOn(ctx, t, 'check', i)) return { what: t.label, detail: list[i], run: { kind: 'check', idx: i }, btn: 'Done' };
   return null;
 }
-const unitWord = (t) => ({ pin: 'Pin', article: 'Article', youtube: 'Video' }[t.unit] || 'Unit');
+const unitWord = (t) => ({ pin: 'Pin', article: 'Article', youtube: 'Video' }[t.unit] || 'Item');
+// A counter not tied to sites or accounts (e.g. "calls made"): numbered boxes, like a per-site counter.
+const plainCounter = (t) => !t.asset_id && !(t.meta.asset_ids || []).length;
 
 function NextAction({ ctx }) {
   const [skip, setSkip] = useState(0);
@@ -529,7 +531,7 @@ function TaskRow({ t, ctx }) {
   const target = t.progress.scoreTarget;
   const done = target > 0 && live.scoreDone >= target;
   const reported = t.status === 'reported';
-  const Body = t.type === 'counter' ? (t.asset_id ? CounterBoxes : SharedCounter) : t.type === 'social' ? SocialSlot : CheckItems;
+  const Body = t.type === 'counter' ? (t.asset_id || plainCounter(t) ? CounterBoxes : SharedCounter) : t.type === 'social' ? SocialSlot : CheckItems;
   const a = t.asset_id ? ctx.assets.get(t.asset_id) : null;
   const pctv = target ? Math.round((live.scoreDone / target) * 100) : 0;
   return html`<div class=${'task' + (done ? ' done' : '') + (reported ? ' reported' : '')} id=${'task-' + t.id}>
@@ -552,6 +554,7 @@ function TaskRow({ t, ctx }) {
 
 function sub(t, ctx) {
   if (t.unit === 'youtube') return 'Completed by publishing a video in YouTube';
+  if (t.type === 'counter' && plainCounter(t)) return t.meta.unit_label || '';
   if (t.type === 'counter' && !t.asset_id) return `Shared goal · ${(t.meta.asset_ids || []).length} site${(t.meta.asset_ids || []).length > 1 ? 's' : ''}`;
   if (t.type === 'counter') return t.meta.unit_label || (t.unit === 'article' ? 'articles published' : '');
   if (t.type === 'social') {

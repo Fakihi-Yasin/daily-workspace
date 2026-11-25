@@ -51,7 +51,7 @@ export function Projects() {
       <button class=${'btn sm' + (!cat ? ' dark' : '')} aria-pressed=${!cat} onClick=${() => setCat(null)}>All</button>
       ${cats.map(c => html`<button class=${'btn sm' + (cat === c.id ? ' dark' : '')} aria-pressed=${cat === c.id} onClick=${() => pickCat(c.id)}>${c.name}</button>`)}
     </div>
-    ${list.length === 0 ? html`<${Empty} title=${selCat ? `No ${selCat.name} projects yet` : 'Nothing here yet'}>${selCat ? 'Use “New project” to plan one.' : 'Add an IPTV country, a blog topic or a digital product.'}</${Empty}>`
+    ${list.length === 0 ? html`<${Empty} title=${selCat ? `No ${selCat.name} projects yet` : 'Nothing here yet'}>${selCat ? 'Use “New project” to plan one.' : 'Add a client project, a product idea or an internal initiative.'}</${Empty}>`
       : groups ? groups.map(g => html`<section key=${g.c.id ?? 'none'} class="pgroup" aria-label=${g.c.name}>
           <div class="section-head"><h2 class="pgroup-title">${g.c.name}</h2><span class="muted small num">${g.items.length}</span></div>
           <div class="cards">${g.items.map(card)}</div></section>`)
@@ -97,10 +97,10 @@ function CategoryField({ value, onChange, cats }) {
 
 function Fields({ f, set, cats }) {
   return html`<div class="stack">
-    <label class="field">Name<input type="text" required value=${f.name} onInput=${(e) => set({ name: e.target.value })} placeholder="e.g. IPTV Belgium" /></label>
+    <label class="field">Name<input type="text" required value=${f.name} onInput=${(e) => set({ name: e.target.value })} placeholder="e.g. Website redesign" /></label>
     <div class="grid2">
       <${CategoryField} value=${f.category_id} onChange=${(id) => set({ category_id: id })} cats=${cats} />
-      <label class="field">Country or topic<input type="text" value=${f.topic} onInput=${(e) => set({ topic: e.target.value })} placeholder="Belgium, recipes, crochet…" /></label>
+      <label class="field">Client or topic<input type="text" value=${f.topic} onInput=${(e) => set({ topic: e.target.value })} placeholder="Acme Inc., onboarding, Q3 launch…" /></label>
     </div>
     <fieldset><legend>Status</legend><div class="seg">${Object.entries(STATUS).map(([k, l]) => html`<button type="button" class=${f.status === k ? 'on' : ''} onClick=${() => set({ status: k })}>${l}</button>`)}</div></fieldset>
     ${(f.status === 'planned_date' || f.status === 'in_progress' || f.status === 'done') && html`<div class="row wrap" style="align-items:flex-end">
@@ -180,7 +180,7 @@ function ProjectDetail({ p, cats, onClose }) {
         <form class="row" style="margin-top:8px" onSubmit=${async (e) => { e.preventDefault(); if (!newM.trim()) return; await act('POST', `/api/projects/${p.id}/milestones`, { title: newM }); setNewM(''); }}>
           <input type="text" value=${newM} onInput=${(e) => setNewM(e.target.value)} placeholder="New milestone" aria-label="New milestone" /><button class="btn">Add</button>
         </form>
-        ${p.coding_sec > 0 && html`<p class="small muted" style="margin-top:10px">Coding time on this project: ${fmtDur(p.coding_sec)}</p>`}
+        ${p.coding_sec > 0 && html`<p class="small muted" style="margin-top:10px">Focus time on this project: ${fmtDur(p.coding_sec)}</p>`}
       </div>
       <form onSubmit=${async (e) => { e.preventDefault(); await act('PUT', `/api/projects/${p.id}`, toBody(f)); toast({ msg: 'Project saved' }); }}>
         <${Fields} f=${f} set=${set} cats=${cats} />

@@ -145,13 +145,15 @@ export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const pct = (n) => (n == null ? '—' : `${Math.round(n)}%`);
 
 export const KIND_LABELS = {
-  site_iptv: 'IPTV site', site_blog: 'Blog site', site_other: 'Other site', pinterest: 'Pinterest', facebook: 'Facebook',
+  site_iptv: 'IPTV site', site_blog: 'Blog site', site_other: 'Website', pinterest: 'Pinterest', facebook: 'Facebook',
   instagram: 'Instagram', youtube: 'YouTube', other: 'Other',
 };
 export const KIND_PLURAL = {
-  site_iptv: 'IPTV sites', site_blog: 'Blog sites', site_other: 'Other sites', pinterest: 'Pinterest accounts', facebook: 'Facebook pages',
-  instagram: 'Instagram accounts', youtube: 'YouTube channels', other: 'Others',
+  site_iptv: 'IPTV sites', site_blog: 'Blog sites', site_other: 'Websites', pinterest: 'Pinterest accounts', facebook: 'Facebook pages',
+  instagram: 'Instagram accounts', youtube: 'YouTube channels', other: 'Other',
 };
+// Types offered when adding or picking: "IPTV site" only for accounts that already use it.
+export const kindsFor = (assets, keep) => Object.keys(KIND_LABELS).filter(k => k !== 'site_iptv' || k === keep || (assets || []).some(a => a.kind === 'site_iptv'));
 export const KIND_COLOR = { site_iptv: 'blue', site_blog: 'mint', site_other: 'sky', pinterest: 'pink', facebook: 'sky', instagram: 'yellow', youtube: 'pink', other: 'ink' };
 
 // ---------- primitives ----------

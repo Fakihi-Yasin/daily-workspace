@@ -25,6 +25,10 @@ export function Stats() {
   const countTile = (k, label) => { const c = counts[k] || { active: 0 }; return html`<div class="tile"><span class="v">${c.active || 0}</span><span class="k">${label}</span>
     ${(c.paused || c.archived || c.pending) ? html`<span class="small muted">${[c.paused && c.paused + ' paused', c.archived && c.archived + ' archived', c.pending && c.pending + ' upcoming'].filter(Boolean).join(' · ')}</span>` : ''}</div>`; };
   const maxOf = (l) => Math.max(1, ...l.map(x => x.count));
+  // Only what this account uses: a kind of site/account it has, or activity in the period.
+  const has = (...ks) => ks.some(k => counts[k] && (counts[k].active || counts[k].paused || counts[k].pending || counts[k].archived));
+  const assetKinds = Object.keys(KIND_PLURAL).filter(k => has(k));
+  const tile = (show, v, k) => show ? html`<div class="tile"><span class="v">${v}</span><span class="k">${k}</span></div>` : '';
   const inspectList = boot.assets.filter(x => x.status !== 'pending');
   return html`<div>
     <header class="page-head"><h1>Stats</h1></header>
@@ -38,32 +42,33 @@ export function Stats() {
         <option value="">a site or account…</option>${inspectList.map(x => html`<option value=${x.id}>${x.name} (${KIND_LABELS[x.kind]})</option>`)}</select></label>
     </div>
 
-    <section><div class="section-head"><h3>My assets</h3><span class="muted small">today</span></div>
+    <section><div class="section-head"><h3>My sites, accounts & projects</h3><span class="muted small">today</span></div>
       <div class="tiles">
-        ${countTile('site_iptv', 'IPTV sites')}${countTile('site_blog', 'Blog sites')}${countTile('facebook', 'Facebook pages')}${countTile('instagram', 'Instagram accounts')}
-        ${countTile('pinterest', 'Pinterest accounts')}${countTile('youtube', 'YouTube channels')}
-        <div class="tile"><span class="v">${counts.digital_projects.active}</span><span class="k">Digital products</span>${counts.digital_projects.done ? html`<span class="small muted">${counts.digital_projects.done} done</span>` : ''}</div>
+        ${assetKinds.map(k => countTile(k, KIND_PLURAL[k]))}
+        <div class="tile"><span class="v">${counts.projects.active}</span><span class="k">Open projects</span>${counts.projects.done ? html`<span class="small muted">${counts.projects.done} done</span>` : ''}</div>
+        ${(counts.digital_projects.active || counts.digital_projects.done) ? html`<div class="tile"><span class="v">${counts.digital_projects.active}</span><span class="k">Digital products</span>${counts.digital_projects.done ? html`<span class="small muted">${counts.digital_projects.done} done</span>` : ''}</div>` : ''}
       </div></section>
 
     ${window.__dash && window.__dash.rpc && html`<section class="section"><div class="section-head"><h3>Team Work</h3><span class="muted small">shared teams, kept apart from your personal scores</span></div><${TeamCountTiles} /></section>`}
 
     <section class="section"><div class="section-head"><h3>Actual activity</h3><span class="muted small">what was really done, extras included</span></div>
       <div class="tiles">
-        <div class="tile"><span class="v">${a.pins}</span><span class="k">Pins published</span></div>
-        <div class="tile"><span class="v">${a.articles}</span><span class="k">Articles published</span></div>
-        <div class="tile"><span class="v">${a.videos}</span><span class="k">Videos produced</span></div>
-        <div class="tile"><span class="v">${a.publications}</span><span class="k">FB/IG publications</span></div>
-        <div class="tile"><span class="v">${a.youtube}</span><span class="k">YouTube videos published</span></div>
         <div class="tile"><span class="v">${a.tasksCompleted}<small class="muted" style="font-size:16px">/${a.tasksScheduled}</small></span><span class="k">Tasks completed</span></div>
-        <div class="tile"><span class="v">${fmtDur(data.coding.total_sec)}</span><span class="k">Coding (${data.coding.sessions} session${data.coding.sessions > 1 ? 's' : ''})</span></div>
+        ${a.unitsByRoutine.map(u => html`<div class="tile"><span class="v">${u.count}</span><span class="k">${u.unit_label}</span><span class="small muted">${u.name}</span></div>`)}
+        ${tile(a.pins || has('pinterest'), a.pins, 'Pins published')}
+        ${tile(a.articles || has('site_iptv', 'site_blog'), a.articles, 'Articles published')}
+        ${tile(a.videos, a.videos, 'Videos produced')}
+        ${tile(a.publications || has('facebook', 'instagram'), a.publications, 'Social posts published')}
+        ${tile(a.youtube, a.youtube, 'YouTube videos published')}
+        <div class="tile"><span class="v">${fmtDur(data.coding.total_sec)}</span><span class="k">Focus (${data.coding.sessions} session${data.coding.sessions > 1 ? 's' : ''})</span></div>
         <div class="tile"><span class="v">${fmtDur(data.study.total_min * 60)}</span><span class="k">Study</span></div>
       </div>
       <div class="grid2" style="margin-top:12px">
-        <${HList} title="Pins per account" list=${a.pinsByAccount} max=${maxOf(a.pinsByAccount)} onPick=${setInspect} color="pink" />
-        <${HList} title="Articles per site" list=${a.articlesBySite} max=${maxOf(a.articlesBySite)} onPick=${setInspect} color="mint" />
-        <${HList} title="Publications per page" list=${a.publicationsByPage} max=${maxOf(a.publicationsByPage)} onPick=${setInspect} color="sky"
-          extra=${Object.entries(a.publicationsByPlatform).map(([k, n]) => `${KIND_LABELS[k] || k}: ${n}`).join(' · ')} />
-        <div class="card"><h4 style="margin-bottom:8px">Coding time per project</h4>
+        ${(a.pinsByAccount.length || has('pinterest')) && html`<${HList} title="Pins per account" list=${a.pinsByAccount} max=${maxOf(a.pinsByAccount)} onPick=${setInspect} color="pink" />`}
+        ${(a.articlesBySite.length || has('site_iptv', 'site_blog', 'site_other')) && html`<${HList} title="Articles per site" list=${a.articlesBySite} max=${maxOf(a.articlesBySite)} onPick=${setInspect} color="mint" />`}
+        ${(a.publicationsByPage.length || has('facebook', 'instagram')) && html`<${HList} title="Posts per page" list=${a.publicationsByPage} max=${maxOf(a.publicationsByPage)} onPick=${setInspect} color="sky"
+          extra=${Object.entries(a.publicationsByPlatform).map(([k, n]) => `${KIND_LABELS[k] || k}: ${n}`).join(' · ')} />`}
+        <div class="card"><h4 style="margin-bottom:8px">Focus time per project</h4>
           ${Object.keys(data.coding.byProject).length ? Object.entries(data.coding.byProject).sort((x, y) => y[1] - x[1]).map(([n, s]) => html`<div class="hbar"><span class="name">${n}</span><${Bar} value=${(s / Math.max(...Object.values(data.coding.byProject))) * 100} thin /><span class="v">${fmtDur(s)}</span></div>`)
             : html`<p class="muted small">No finished sessions.</p>`}
           ${data.study.byCourse.length > 0 && html`<h4 style="margin:12px 0 8px">Study per course</h4>${data.study.byCourse.map(c => html`<div class="hbar"><span class="name">${c.name}</span><${Bar} value=${(c.m / Math.max(...data.study.byCourse.map(x => x.m))) * 100} thin color="mint" /><span class="v">${fmtDur(c.m * 60)}</span></div>`)}`}
