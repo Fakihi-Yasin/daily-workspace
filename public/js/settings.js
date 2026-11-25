@@ -1,8 +1,9 @@
 // Settings: accounts & sites, routines (versioned with effective dates), categories, timezone, backup, demo.
 import { html, useState, useEffect, useRef, useResource, api, act, bus, toast, Icon, useTheme, THEMES, downloadJson, isBrowserStorage, isCloudStorage, BROWSER_NOTE, CLOUD_NOTE, Chip, Modal, EffectPicker, Empty, fmtDay, fmtShort, addDays,
   KIND_LABELS, KIND_PLURAL, KIND_COLOR, DAYS, DAY_NAMES, kindsFor, ActionsMenu } from './lib.js';
+import { PcTimeSettings } from './pctime.js';
 
-const TABS = [['assets', 'Accounts & sites'], ['routines', 'Routines'], ['categories', 'Categories'], ['general', 'General'], ['backup', 'Backup'], ['demo', 'Demo']];
+const TABS = [['assets', 'Accounts & sites'], ['routines', 'Routines'], ['categories', 'Categories'], ['general', 'General'], ['pctime', 'PC Work Time'], ['backup', 'Backup'], ['demo', 'Demo']];
 
 export function Settings() {
   const [tab, setTab] = useState(() => {
@@ -20,6 +21,7 @@ export function Settings() {
       : tab === 'routines' ? html`<${Routines} data=${data} />`
       : tab === 'categories' ? html`<${Categories} data=${data} />`
       : tab === 'general' ? html`<${General} data=${data} />`
+      : tab === 'pctime' ? html`<${PcTimeSettings} />`
       : tab === 'backup' ? html`<${Backup} />`
       : html`<${Demo} />`}
   </div>`;

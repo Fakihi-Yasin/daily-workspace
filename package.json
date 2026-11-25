@@ -14,7 +14,7 @@
     "build": "node scripts/build.js",
     "build:test": "AUTH_PROVIDER=test node scripts/build.js",
     "preview": "node scripts/preview.js dist 4322",
-    "test": "node --test test/flows.test.js test/local-backend.test.js test/cloud-sync.test.js test/v2-features.test.js test/roles-teams.test.js test/general-starter.test.js",
+    "test": "node --test test/flows.test.js test/local-backend.test.js test/cloud-sync.test.js test/v2-features.test.js test/roles-teams.test.js test/general-starter.test.js test/pc-work-time.test.js && python3 -m unittest discover -s agent -p 'test_*.py'",
     "check:rls": "node scripts/check-rls.mjs"
   },
   "devDependencies": {

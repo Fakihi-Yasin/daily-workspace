@@ -82,6 +82,9 @@ esbuild.buildSync({
 const copy = (from, to) => fs.copyFileSync(r(from), path.join(outdir, to));
 copy('public/styles.css', 'assets/styles.css');
 copy('public/favicon.svg', 'favicon.svg');
+// PC Work Time agent for Ubuntu, downloaded by the install command shown in Settings → PC Work Time.
+fs.mkdirSync(path.join(outdir, 'pc-agent'), { recursive: true });
+for (const f of ['dw-pc-time.py', 'install.sh', 'uninstall.sh']) copy(`agent/${f}`, `pc-agent/${f}`);
 for (const f of fs.readdirSync(r('public/fonts'))) copy(`public/fonts/${f}`, `assets/fonts/${f}`);
 copy('node_modules/sql.js/dist/sql-wasm.wasm', 'assets/sql-wasm.wasm');
 // Stylesheet lives in /assets/: point font URLs there.

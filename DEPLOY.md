@@ -284,3 +284,23 @@ TEST ONLY). Build with `SUPABASE_URL=http://localhost:54321 SUPABASE_PUBLISHABLE
 then serve it with `node scripts/preview.js dist-test 4323`. Open
 `http://localhost:54321/__bootstrap?user=<name>` to make the test account `test|<name>` the first
 Super Admin. `npm test` includes `test/roles-teams.test.js`, which runs the same SQL.
+
+## PC Work Time (Ubuntu agent)
+
+Counts active computer time and stores **one total per day** in the account, separately from Focus
+Sessions. Migration: `supabase/migrations/20261126000000_pc_work_time.sql`. Agent: `agent/` (served at
+`/pc-agent/` by the build).
+
+- **Connect a PC:** Settings → PC Work Time → name → **Connect this PC**, then run the command it shows
+  in a Terminal on that computer (Ubuntu 24.04, no sudo). It installs into `~/.local/share`, a systemd
+  user service that starts with the desktop session, and a “PC Work Time” launcher with Pause / Resume.
+- **Counting:** keyboard/mouse activity via GNOME's idle monitor (Wayland and X11). Stops after N idle
+  minutes (5 by default, set in the dashboard or `dw-pc-time idle N`), while the screen is locked
+  (GNOME ScreenSaver), while paused, and across suspend (no time is counted for the gap).
+- **Privacy:** no screenshots, window titles, keystrokes or activity timeline. The device key is
+  stored only as a SHA-256 hash; it can only add PC time to its own account and stops working when the
+  computer is disconnected or the account is blocked.
+- **Offline:** totals stay in `~/.local/state/daily-workspace-pc-time/state.json` and upload when the
+  connection is back (a retry never double-counts: the server keeps the highest total per day).
+- **Commands:** `dw-pc-time status | pause | resume | idle N | sync`. Remove:
+  `curl -fsSL https://<dashboard>/pc-agent/uninstall.sh | bash`.

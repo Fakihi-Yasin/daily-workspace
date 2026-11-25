@@ -1,5 +1,6 @@
 // "Today": the routine checklist first, with a compact focus panel and a right column (score, next action, sessions).
 import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, Modal, AutoGrow, TaskText, firstLine, fmtDay, fmtShort, addDays, fmtDur, pct } from './lib.js';
+import { PcTimeCard } from './pctime.js';
 import { FocusPanel, requestStart } from './focus.js';
 import { CompletedModal } from './history.js';
 
@@ -84,6 +85,7 @@ export function Today() {
         <${ScoreCard} count=${count} data=${data} onHistory=${() => setShowDone(true)} />
         <${NextAction} ctx=${ctx} />
         <${SessionsCard} sessions=${data.sessions} isToday=${isToday} />
+        ${isToday && html`<${PcTimeCard} today=${data.today} />`}
       </aside>
 
       <div class="tg-tasks">

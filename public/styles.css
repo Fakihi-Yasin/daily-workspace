@@ -784,3 +784,11 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-directio
 .edit-diff dd { margin: 0; overflow-wrap: anywhere; }
 .modal-body p + p { margin-top: 10px; }
 
+
+/* PC Work Time */
+.pc-nums { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+.pc-nums > div { display: flex; flex-direction: column; }
+.pc-nums .v { font-family: var(--head); font-weight: 800; font-stretch: 80%; font-size: 26px; line-height: 1.1; }
+.pc-nums .k { font-size: 12.5px; color: var(--muted); }
+.pc-rules { margin: 10px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.pc-cmd { white-space: pre-wrap; word-break: break-all; background: var(--track); border-radius: 10px; padding: 12px; font-size: 12.5px; margin: 10px 0; user-select: all; }
