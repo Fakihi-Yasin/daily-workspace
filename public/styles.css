@@ -734,12 +734,17 @@ main { padding-bottom: 32px; }
 .team-name { font-size: 16px; overflow-wrap: anywhere; }
 .team-summary { margin-bottom: 18px; }
 .team-new-task { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.add-member { margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
-.add-member > label { font-weight: 600; font-size: 13px; }
-.add-member-row { display: flex; gap: 10px; flex-wrap: wrap; }
-.add-member-row input { flex: 1 1 260px; width: auto; }
-.add-member-row .btn { flex: 0 0 auto; }
+.add-member { margin-bottom: 14px; display: flex; flex-direction: column; gap: 10px; }
+.add-member h4 { margin: 0; font-size: 15px; }
 .add-member .hint { margin: 0; }
+.add-member-search { width: 100%; }
+.pick-list { display: flex; flex-direction: column; list-style: none; margin: 0; padding: 4px; max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.pick-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; }
+.pick-list li + li { border-top: 1px solid var(--line); }
+.pick-list li:hover { background: var(--card); }
+.pick-avatar { flex: 0 0 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--accent-soft); color: var(--ink); }
+.pick-id { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pick-id > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .team-new-task select, .team-new-task input[type=date] { width: auto; }
 .board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .board-col { background: var(--track); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 80px; }
@@ -766,3 +771,11 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-directio
 .search:focus-within { border-color: var(--accent); }
 .users-table tr.is-blocked td { color: var(--muted); }
 .users-table td { vertical-align: middle; }
+
+/* Users page: actions and edit dialog */
+.row-actions { display: inline-flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.edit-user { display: flex; flex-direction: column; gap: 14px; }
+.edit-diff { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 0; }
+.edit-diff dt { font-weight: 600; }
+.edit-diff dd { margin: 0; overflow-wrap: anywhere; }
+.modal-body p + p { margin-top: 10px; }

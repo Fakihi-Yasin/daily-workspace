@@ -251,6 +251,15 @@ the redirect straight after signup, even if they never reach the workspace.
 
 ### Rules in short
 Members can be Users or Admins; the same rules apply. Only Admins and Super Admins can create a team.
+A team name is unique per owner (case ignored); different owners may use the same name. To add a
+member, the owner picks from the list of active accounts not yet in the team (name and email), or adds
+by verified email.
+
+**Users page actions (Super Admin):** change role, Block / Unblock, **Edit** name and email (an email
+set here counts as confirmed), and **Delete**. Delete removes the account from the app and its teams
+(tasks it created pass to the team owner; tasks assigned to it become unassigned). Its dashboard goes
+to `app_private.deleted_snapshots` for recovery from the SQL editor. Team owners can't be deleted until
+their teams are deleted, and the Auth0 login is untouched: Block is the way to keep someone out.
 
 | | Owner of the team | Member | Super Admin (not a member) | Everyone else |
 |---|---|---|---|---|

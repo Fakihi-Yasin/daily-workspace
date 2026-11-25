@@ -359,6 +359,83 @@ test('personal snapshots stay private: nobody reads another account’s dashboar
   assert.deepEqual(mine.rows, []);
 });
 
+test('team names are unique per owner; two owners may share a name', async () => {
+  await assert.rejects(call('A', 'team_create', { p_name: '  alpha ' }), (e) => /already have a team called/.test(e.message) && e.code === 'PT409');
+  const same = (await call('B', 'team_create', { p_name: 'Alpha' })).id; // B's own "Alpha" is fine
+  await assert.rejects(call('B', 'team_rename', { p_team_id: TB, p_name: 'ALPHA' }), /already have a team called/);
+  await call('B', 'team_rename', { p_team_id: TB, p_name: 'bravo' }); // same team, new case: allowed
+  await call('B', 'team_rename', { p_team_id: TB, p_name: 'Bravo' });
+  await call('B', 'team_delete', { p_team_id: same });
+});
+
+test('the team owner picks new members from the list of active accounts', async () => {
+  const D = 'auth0|userdave000000000000000';
+  who.D = claimsFor(D, { email: 'dave@example.test', name: 'Dave' });
+  await call('D', 'register_me');
+  const list = await call('A', 'team_member_candidates', { p_team_id: TA });
+  const ids = list.map(u => u.id);
+  assert.ok(ids.includes(D) && !ids.includes(A), 'lists accounts not yet in the team');
+  assert.ok(list.every(u => 'email' in u && 'name' in u && !('role' in u)), 'name and email only, no role');
+  await call('SA', 'admin_set_status', { p_user_id: D, p_status: 'blocked' });
+  assert.ok(!(await call('A', 'team_member_candidates', { p_team_id: TA })).some(u => u.id === D), 'blocked accounts are not listed');
+  await assert.rejects(call('A', 'team_add_member_id', { p_team_id: TA, p_user_id: D }), /No active account/);
+  await call('SA', 'admin_set_status', { p_user_id: D, p_status: 'active' });
+  assert.equal((await call('A', 'team_add_member_id', { p_team_id: TA, p_user_id: D })).name, 'Dave');
+  await assert.rejects(call('A', 'team_add_member_id', { p_team_id: TA, p_user_id: D }), /Already a member/);
+  // Only the owner: members, other Admins and the read-only Super Admin can't list or add.
+  await refused(call('D', 'team_member_candidates', { p_team_id: TA }));
+  await assert.rejects(call('B', 'team_member_candidates', { p_team_id: TA }), /Team not found/);
+  await refused(call('SA', 'team_add_member_id', { p_team_id: TA, p_user_id: B }), /Only the team owner/);
+  await refused(pg.rpc(null, 'team_member_candidates', { p_team_id: TA }));
+  await call('A', 'team_remove_member', { p_team_id: TA, p_user_id: D });
+});
+
+test('Super Admin edits an account’s name and email, with an audit entry; others cannot', async () => {
+  const E = 'google-oauth2|eve0000000000000000000';
+  who.E = claimsFor(E, {}); // a Google account whose token carries no email or name
+  await call('E', 'register_me');
+  await refused(call('A', 'admin_update_user', { p_user_id: E, p_name: 'x', p_email: null }));
+  await refused(call('E', 'admin_update_user', { p_user_id: E, p_name: 'Me', p_email: 'boss@example.test' }));
+  await assert.rejects(call('SA', 'admin_update_user', { p_user_id: E, p_name: 'Eve', p_email: 'not-an-email' }), /look like an email/);
+  const r = await call('SA', 'admin_update_user', { p_user_id: E, p_name: ' Eve ', p_email: 'Eve@Example.test' });
+  assert.deepEqual(r, { user_id: E, name: 'Eve', email: 'eve@example.test' });
+  const row = (await call('SA', 'admin_list_users')).find(u => u.user_id === E);
+  assert.equal(row.email_verified, true, 'an email set by a Super Admin counts as confirmed');
+  assert.equal((await call('E', 'my_access')).role, 'user', 'editing never changes the role');
+  // Now addable by that email; a token without claims doesn't wipe the edit on the next sign-in.
+  await call('E', 'register_me');
+  assert.equal((await call('A', 'team_add_member', { p_team_id: TA, p_email: 'eve@example.test' })).name, 'Eve');
+  const audit = await call('SA', 'admin_audit', { p_limit: 5 });
+  assert.ok(audit.some(a => a.action === 'profile' && a.target.name === 'Eve'));
+});
+
+test('Super Admin deletes an account: teams cleaned up, dashboard kept for recovery, never self or a team owner', async () => {
+  const E = 'google-oauth2|eve0000000000000000000';
+  await call('E', 'save_snapshot', { p_slot: 'real', p_expected_rev: null, p_new_rev: 'eve-rev-1', p_snapshot: snap('eve-rev-1') });
+  const k = (await call('E', 'team_task_create', { p_team_id: TA, p_title: 'Eve wrote this', p_assignee_id: E })).id;
+  await refused(call('A', 'admin_delete_user', { p_user_id: E }));
+  await refused(call('E', 'admin_delete_user', { p_user_id: B }));
+  await assert.rejects(call('SA', 'admin_delete_user', { p_user_id: SA }), /your own account/);
+  await assert.rejects(call('SA', 'admin_delete_user', { p_user_id: A }), /owns "Alpha" — delete those teams first/);
+  assert.deepEqual(await call('SA', 'admin_delete_user', { p_user_id: E }), { deleted: E, dashboards_kept: 1 });
+  assert.ok(!(await call('SA', 'admin_list_users')).some(u => u.user_id === E));
+  const t = await call('A', 'team_get', { p_team_id: TA });
+  assert.ok(!t.members.some(m => m.id === E), 'removed from the team');
+  const task = t.tasks.find(x => x.id === k);
+  assert.equal(task.assignee, null, 'their task is unassigned');
+  assert.equal(task.created_by.id, A, 'and now belongs to the team owner');
+  const kept = (await pg.admin('select rev from app_private.deleted_snapshots where user_id = $1', [E])).rows;
+  assert.deepEqual(kept, [{ rev: 'eve-rev-1' }]);
+  assert.equal((await pg.admin('select count(*)::int n from public.snapshots where user_id = $1', [E])).rows[0].n, 0);
+  // Other dashboards are untouched.
+  assert.equal((await call('A', 'get_snapshot', { p_slot: 'real', p_with_data: false })) !== undefined, true);
+  // The audit keeps the name; signing in again starts over as a new User with an empty dashboard.
+  assert.ok((await call('SA', 'admin_audit', { p_limit: 5 })).some(a => a.action === 'delete' && a.target.name === 'Eve'));
+  assert.equal((await call('E', 'register_me')).role, 'user');
+  assert.equal(await call('E', 'get_snapshot', { p_slot: 'real', p_with_data: true }), null);
+  await assert.rejects(call('SA', 'admin_delete_user', { p_user_id: 'auth0|nobody00000000000' }), (e) => e.code === 'PT404');
+});
+
 test('only the owner deletes a team; deleting removes its tasks and projects', async () => {
   await call('A', 'team_delete', { p_team_id: TA });
   assert.deepEqual(await call('A', 'team_list', { p_scope: 'mine' }), []);
