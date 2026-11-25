@@ -4,7 +4,7 @@
 //
 // Errors carry flags for the UI:
 //   offline  no connection          auth    the sign-in expired (401 / token errors)
-//   denied   the account is blocked or waiting for access (workspace_access_denied)
+//   denied   the account is blocked (workspace_access_denied)
 //   status, code                    HTTP status and Postgres error code
 export function createRpc({ url, publishableKey, getToken, fetchImpl = globalThis.fetch.bind(globalThis) }) {
   const base = url.replace(/\/+$/, '') + '/rest/v1/rpc/';
@@ -28,7 +28,7 @@ export function createRpc({ url, publishableKey, getToken, fetchImpl = globalThi
     if (!res.ok) {
       const raw = (body && (body.message || body.msg || body.error)) || `HTTP ${res.status}`;
       const denied = /workspace_access_denied/.test(raw);
-      const msg = denied ? 'This account is blocked or waiting for access.'
+      const msg = denied ? 'This account is blocked.'
         : raw === 'super_admin_required' ? 'Only a Super Admin can do that.'
         : raw;
       throw Object.assign(new Error(msg), {

@@ -267,10 +267,13 @@ export function EffectPicker({ value, onChange, today, allowToday = true, hint }
   const mode = value === today ? 'today' : value === tomorrow ? 'tomorrow' : 'date';
   return html`<fieldset class="effect">
     <legend>Takes effect from</legend>
-    <div class="seg">
-      ${allowToday && html`<button type="button" class=${mode === 'today' ? 'on' : ''} onClick=${() => onChange(today)}>Today</button>`}
-      <button type="button" class=${mode === 'tomorrow' ? 'on' : ''} onClick=${() => onChange(tomorrow)}>Tomorrow</button>
-      <input type="date" aria-label="Other date" min=${allowToday ? today : tomorrow} value=${value} onInput=${(e) => e.target.value && onChange(e.target.value)} />
+    <div class="effect-row">
+      <div class="seg">
+        ${allowToday && html`<button type="button" aria-pressed=${mode === 'today'} class=${mode === 'today' ? 'on' : ''} onClick=${() => onChange(today)}>Today</button>`}
+        <button type="button" aria-pressed=${mode === 'tomorrow'} class=${mode === 'tomorrow' ? 'on' : ''} onClick=${() => onChange(tomorrow)}>Tomorrow</button>
+      </div>
+      <span class="muted small">or pick a date</span>
+      <input type="date" class=${'effect-date' + (mode === 'date' ? ' on' : '')} aria-label="Other date" min=${allowToday ? today : tomorrow} value=${value} onInput=${(e) => e.target.value && onChange(e.target.value)} />
     </div>
     <p class="hint">${hint || 'Past days keep their targets and scores.'} Effective: <strong>${fmtDay(value)}</strong>.</p>
   </fieldset>`;

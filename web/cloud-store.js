@@ -25,7 +25,7 @@ const PUSH_DELAY_MS = 600;
 export const newRev = () => `${Date.now().toString(36)}-${(globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)).slice(0, 13)}`;
 
 // Snapshot calls through the database functions (supabase/migrations). Reads use get_snapshot(),
-// which refuses a blocked or waiting account with an explicit error (`denied`) instead of returning
+// which refuses a blocked account with an explicit error (`denied`) instead of returning
 // "no data", so a device never mistakes revoked access for an empty cloud.
 export function createSupabaseRemote({ rpc }) {
   const tag = (e) => { if (!e.denied && !e.offline && !e.auth) e.message = `Sync server: ${e.message}`; throw e; };
