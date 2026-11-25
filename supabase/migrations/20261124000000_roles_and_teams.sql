@@ -200,13 +200,13 @@ declare owner text;
 begin
   select t.owner_id into owner from public.teams t where t.id = p_team;
   if not found then
-    raise exception 'Team not found' using errcode = 'P0002';
+    raise exception 'Team not found' using errcode = 'PT404';
   end if;
   if owner = p_me.user_id then return 'owner'; end if;
   if app_private.is_member(p_team, p_me.user_id) then return 'member'; end if;
   if p_me.role = 'super_admin' then return 'viewer'; end if;
   -- Same answer as a team that doesn't exist: a non-member learns nothing about other teams.
-  raise exception 'Team not found' using errcode = 'P0002';
+  raise exception 'Team not found' using errcode = 'PT404';
 end;
 $$;
 
@@ -356,7 +356,7 @@ begin
     raise exception 'You can''t change your own role. Ask another Super Admin.' using errcode = 'P0001';
   end if;
   select * into t from public.app_users where user_id = p_user_id for update;
-  if not found then raise exception 'User not found' using errcode = 'P0002'; end if;
+  if not found then raise exception 'User not found' using errcode = 'PT404'; end if;
   if t.role = p_role then
     return jsonb_build_object('user_id', t.user_id, 'role', t.role, 'status', t.status);
   end if;
@@ -386,7 +386,7 @@ begin
     raise exception 'You can''t block or unblock your own account.' using errcode = 'P0001';
   end if;
   select * into t from public.app_users where user_id = p_user_id for update;
-  if not found then raise exception 'User not found' using errcode = 'P0002'; end if;
+  if not found then raise exception 'User not found' using errcode = 'PT404'; end if;
   if t.status = p_status then
     return jsonb_build_object('user_id', t.user_id, 'role', t.role, 'status', t.status);
   end if;
@@ -667,7 +667,7 @@ begin
   select array_agg(u.user_id) into found_ids from public.app_users u
    where lower(u.email) = lower(btrim(p_email)) and u.email_verified and u.status = 'active';
   if found_ids is null then
-    raise exception 'No registered account with that verified email. Ask them to sign up and confirm their email first.' using errcode = 'P0002';
+    raise exception 'No registered account with that verified email. Ask them to sign up and confirm their email first.' using errcode = 'PT404';
   end if;
   if array_length(found_ids, 1) > 1 then
     raise exception 'Several accounts use that email. Ask a Super Admin to sort it out.' using errcode = 'P0001';
@@ -700,7 +700,7 @@ begin
   end if;
   delete from public.team_members where team_id = p_team_id and user_id = p_user_id;
   get diagnostics n = row_count;
-  if n = 0 then raise exception 'Not a member of this team.' using errcode = 'P0002'; end if;
+  if n = 0 then raise exception 'Not a member of this team.' using errcode = 'PT404'; end if;
   -- Only current members can be assignees: their open and done tasks here become unassigned.
   update public.team_tasks set assignee_id = null, updated_at = now(), updated_by = me.user_id
    where team_id = p_team_id and assignee_id = p_user_id;
@@ -764,7 +764,7 @@ declare
   bad_key text;
 begin
   select * into k from public.team_tasks where id = p_task_id for update;
-  if not found then raise exception 'Task not found' using errcode = 'P0002'; end if;
+  if not found then raise exception 'Task not found' using errcode = 'PT404'; end if;
   acc := app_private.team_access(k.team_id, me);
   if acc not in ('owner', 'member') then
     raise exception 'Only team members can change tasks.' using errcode = '42501';
@@ -818,7 +818,7 @@ declare
   acc text;
 begin
   select * into k from public.team_tasks where id = p_task_id for update;
-  if not found then raise exception 'Task not found' using errcode = 'P0002'; end if;
+  if not found then raise exception 'Task not found' using errcode = 'PT404'; end if;
   acc := app_private.team_access(k.team_id, me);
   if not (acc = 'owner' or (acc = 'member' and k.created_by = me.user_id)) then
     raise exception 'Only the team owner or the task''s creator can delete it.' using errcode = '42501';
@@ -853,7 +853,7 @@ begin
   else
     update public.team_future_projects set title = btrim(p_title), notes = nullif(btrim(p_notes), '')
      where id = pid and team_id = p_team_id;
-    if not found then raise exception 'Project not found' using errcode = 'P0002'; end if;
+    if not found then raise exception 'Project not found' using errcode = 'PT404'; end if;
   end if;
   return jsonb_build_object('id', pid);
 end;
@@ -870,7 +870,7 @@ declare
   p public.team_future_projects;
 begin
   select * into p from public.team_future_projects where id = p_project_id;
-  if not found then raise exception 'Project not found' using errcode = 'P0002'; end if;
+  if not found then raise exception 'Project not found' using errcode = 'PT404'; end if;
   if app_private.team_access(p.team_id, me) <> 'owner' then
     raise exception 'Only the team owner can manage future projects.' using errcode = '42501';
   end if;
@@ -891,7 +891,7 @@ declare
   tid uuid;
 begin
   select * into p from public.team_future_projects where id = p_project_id for update;
-  if not found then raise exception 'Project not found' using errcode = 'P0002'; end if;
+  if not found then raise exception 'Project not found' using errcode = 'PT404'; end if;
   if app_private.team_access(p.team_id, me) <> 'owner' then
     raise exception 'Only the team owner can manage future projects.' using errcode = '42501';
   end if;

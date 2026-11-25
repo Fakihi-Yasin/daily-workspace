@@ -42,8 +42,10 @@ let down = false;
         const r = await pg.rpc(claims, fn[1], args);
         send(200, r === null ? null : r);
       } catch (e) {
-        // PostgREST: insufficient privilege → 401 signed out / 403 signed in; other errors → 400.
-        const status = e.code === '42501' ? (claims ? 403 : 401) : e.code === '42883' ? 404 : 400;
+        // PostgREST: insufficient privilege → 401 signed out / 403 signed in; SQLSTATE PTxyz → HTTP xyz
+        // (used for "not found" → 404); raise_exception (P0001) and other errors → 400.
+        const pt = /^PT(\d{3})$/.exec(e.code || '');
+        const status = pt ? +pt[1] : e.code === '42501' ? (claims ? 403 : 401) : e.code === '42883' ? 404 : 400;
         send(status, { code: e.code, message: e.message, hint: e.hint || null });
       }
     });

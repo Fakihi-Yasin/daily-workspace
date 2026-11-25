@@ -142,7 +142,8 @@ test('Admins create private teams; each sees only their own; creating a team gra
   assert.deepEqual((await call('A', 'team_list', { p_scope: 'mine' })).map(t => t.name), ['Alpha']);
   assert.deepEqual((await call('B', 'team_list', { p_scope: 'mine' })).map(t => t.name), ['Bravo']);
   await refused(call('A', 'team_list', { p_scope: 'all' }));
-  await assert.rejects(call('A', 'team_get', { p_team_id: TB }), /Team not found/);
+  // PT404: PostgREST answers HTTP 404 (P0002 would be a 500 "server error" on Supabase).
+  await assert.rejects(call('A', 'team_get', { p_team_id: TB }), (e) => /Team not found/.test(e.message) && e.code === 'PT404');
   await assert.rejects(call('A', 'team_scores', { p_team_id: TB, p_date: today, p_tz: 'UTC' }), /Team not found/);
   await assert.rejects(call('A', 'team_task_create', { p_team_id: TB, p_title: 'x' }), /Team not found/);
   assert.deepEqual(await call('A', 'team_stats'), { my_teams: 1 }, 'no global team count for an Admin');
