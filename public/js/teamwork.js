@@ -47,6 +47,8 @@ export const STATUSES = [['todo', 'To do', 'ink'], ['in_progress', 'In progress'
 const statusLabel = (s) => (STATUSES.find(x => x[0] === s) || [s, s])[1];
 const fmtWhen = (iso) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const isSuper = () => window.__dash && window.__dash.role === 'super_admin';
+// Creating teams is for Admins and Super Admins; a User works in the teams they're added to.
+const canCreateTeams = () => window.__dash && (window.__dash.role === 'admin' || window.__dash.role === 'super_admin');
 
 // ---------- counts shown on Team Work and Stats ----------
 export function TeamCountTiles() {
@@ -85,14 +87,14 @@ function TeamLanding() {
           <button role="tab" aria-selected=${scope === 'mine'} class=${scope === 'mine' ? 'on' : ''} onClick=${() => setScope('mine')}>My teams</button>
           <button role="tab" aria-selected=${scope === 'all'} class=${scope === 'all' ? 'on' : ''} onClick=${() => setScope('all')}>All teams</button></div>`}
       </div>
-      ${scope === 'mine' && html`<form class="card flat row wrap team-new" onSubmit=${create}>
+      ${scope === 'mine' && canCreateTeams() && html`<form class="card flat row wrap team-new" onSubmit=${create}>
         <label class="sr-only" for="team-name">New team name</label>
         <input id="team-name" type="text" maxlength="80" placeholder="New team name, e.g. Content crew" value=${name} onInput=${(e) => setName(e.target.value)} style="flex:1;min-width:200px" />
         <button class="btn primary" disabled=${busy || !name.trim()}><${Icon} name="plus" size=${16} />Create team</button>
       </form>`}
       ${error ? html`<p class="notice" role="alert">${error}</p>`
         : !data ? html`<p class="muted">Loading…</p>`
-        : data.length === 0 ? html`<${Empty} title=${scope === 'all' ? 'No teams in the app yet' : 'You’re not in a team yet'}>${scope === 'mine' ? 'Create one above, then add people by the email they signed up with.' : ''}<//>`
+        : data.length === 0 ? html`<${Empty} title=${scope === 'all' ? 'No teams in the app yet' : 'You’re not in a team yet'}>${scope !== 'mine' ? '' : canCreateTeams() ? 'Create one above, then add people by the email they signed up with.' : 'When a team owner adds you by your email, the team shows up here.'}<//>`
         : html`<div class="cards team-cards">${data.map(t => html`<a class="card team-card" href=${'#/teams/' + t.id} key=${t.id}>
             <div class="row"><strong class="team-name">${t.name}</strong><span class="spacer"></span>
               ${t.my_role ? html`<${Chip} color=${t.my_role === 'owner' ? 'solid' : 'ink'}>${t.my_role === 'owner' ? 'Owner' : 'Member'}<//>` : html`<${Chip} color="yellow">Viewing<//>`}</div>
@@ -280,11 +282,13 @@ function People({ ctx }) {
     try { await change('team_remove_member', { p_team_id: teamId, p_user_id: m.id }, 'Removed'); } catch { /* toast shown */ }
   };
   return html`<div>
-    ${ctx.owner && html`<form class="card flat row wrap" onSubmit=${add} style="margin-bottom:14px">
-      <label class="field" style="flex:1;min-width:240px">Add a member by email
-        <input type="email" required placeholder="The email they signed up with" value=${email} onInput=${(e) => setEmail(e.target.value)} />
-        <span class="hint">They need an account here with a confirmed email. Adding them to this team doesn’t change their role.</span></label>
-      <button class="btn primary" disabled=${busy || !email.trim()}>Add member</button>
+    ${ctx.owner && html`<form class="card flat add-member" onSubmit=${add}>
+      <label for="add-member-email">Add a member by email</label>
+      <div class="add-member-row">
+        <input id="add-member-email" type="email" required autocomplete="off" placeholder="name@example.com" value=${email} onInput=${(e) => setEmail(e.target.value)} />
+        <button class="btn primary" disabled=${busy || !email.trim()}><${Icon} name="plus" size=${16} />Add member</button>
+      </div>
+      <p class="hint">Use the email they signed up with. They need an account here with a confirmed email. Adding them doesn’t change their role.</p>
     </form>`}
     <div class="cards">
       ${ctx.team.members.map(m => {

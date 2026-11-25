@@ -140,8 +140,9 @@ app have no server to enforce them, so they keep working as before, without Team
 
 ### What it does
 - **Roles** (`public.app_users`, keyed by the Auth0 user id `sub`, never by name or email):
-  - **User**: every new signup. Sees a "Waiting for access" screen only. No workspace, no Team Work.
-  - **Admin**: the personal workspace plus Team Work for the teams they own or have joined.
+  - **User**: every new signup (the default role). Their own private dashboard straight away, plus
+    the teams someone adds them to. They can't create teams (migration `20261125120000_users_get_workspace.sql`).
+  - **Admin**: the personal workspace plus Team Work: creates teams and manages the ones they own.
   - **Super Admin**: Admin features, plus the **Users** page and a read-only **All teams** view.
     Personal dashboards stay private. Nobody, a Super Admin included, can read another account's snapshot.
 - **Blocking** applies on the account's next request to the database, including from a browser that is
@@ -196,8 +197,8 @@ app have no server to enforce them, so they keep working as before, without Team
    - In Auth0 → Applications → your SPA, add the branch URL
      `https://daily-workspace-git-daily-workspace-v3-<team>.vercel.app` to Allowed Callback URLs,
      Allowed Logout URLs and Allowed Web Origins.
-5. **Sign-ups:** new signups now land on "Waiting for access", so you may turn **Disable Sign Ups**
-   off if you want people to register themselves. If you use the optional `ALLOWED_EMAILS` Action,
+5. **Sign-ups:** every new signup gets their own empty dashboard at once (role User). Leave
+   **Disable Sign Ups** on unless you want anyone to be able to register. If you use the optional `ALLOWED_EMAILS` Action,
    unknown emails are still refused before they can register.
 6. Production: only after Preview works. Do it in this order, all in the **Production** project's SQL
    Editor, and keep the previous working Vercel deployment so you can roll back (Deployments → ⋯ →
@@ -249,7 +250,9 @@ A new signup appears in **Users** the first time the app loads after their Auth0
 the redirect straight after signup, even if they never reach the workspace.
 
 ### Rules in short
-| | Owner of the team | Member | Super Admin (not a member) | Other Admins |
+Members can be Users or Admins; the same rules apply. Only Admins and Super Admins can create a team.
+
+| | Owner of the team | Member | Super Admin (not a member) | Everyone else |
 |---|---|---|---|---|
 | See the team, members (name, email), tasks, scores | ✔ | ✔ | ✔ read-only | ✖ not even its name |
 | Add / remove members, rename, delete the team | ✔ | ✖ | ✖ | ✖ |

@@ -49,7 +49,8 @@ async function start() {
   }
   if (!auth.user) return signInScreen(auth, auth.error);
 
-  // With Supabase, the database decides who may use the workspace (role + blocked status).
+  // With Supabase, the database decides who may use the workspace: every active account (any role)
+  // gets its own dashboard; a blocked account is refused.
   let rpc = null, access = null;
   if (cfg.supabase) {
     rpc = createRpc({ url: cfg.supabase.url, publishableKey: cfg.supabase.publishableKey, getToken: auth.getToken });
@@ -91,7 +92,7 @@ async function start() {
   window.__dash = {
     backend,
     user: auth.user,
-    // Role from the database ('admin' | 'super_admin'), or null without Supabase (no roles, no Team Work).
+    // Role from the database ('user' | 'admin' | 'super_admin'), or null without Supabase (no roles, no Team Work).
     role: access ? access.role : null,
     // Database functions for Team Work and User Management; a refusal re-checks this account's access.
     rpc: rpc ? async (name, args) => {
@@ -128,7 +129,9 @@ async function start() {
   }
 }
 
-const hasWorkspace = (a) => a && a.status === 'active' && (a.role === 'admin' || a.role === 'super_admin');
+// Every active account opens its own dashboard, whatever its role ('user' is the default for new
+// signups). Only a blocked account is kept out. The database enforces the same rule on every call.
+const hasWorkspace = (a) => !!a && a.status === 'active';
 const accessKey = (auth) => `dash.v2.u.${encodeURIComponent(auth.user.id)}.access`;
 
 // Registers this account on first sign-in (as 'user') and returns its role and status. Offline, the
@@ -160,7 +163,7 @@ function startAccessMonitor(rpc, auth, access, revoke) {
       const a = await rpc('my_access');
       window.localStorage.setItem(accessKey(auth), JSON.stringify({ role: a.role, status: a.status }));
       if (!hasWorkspace(a)) { done = true; clearInterval(timer); revoke(a); }
-      else if (a.role !== access.role) { done = true; window.location.reload(); } // Admin ⇄ Super Admin: rebuild the sidebar
+      else if (a.role !== access.role) { done = true; window.location.reload(); } // role changed: rebuild the sidebar
     } catch { /* offline or a transient error: the next check retries */ }
     finally { running = false; }
   }
@@ -170,13 +173,12 @@ function startAccessMonitor(rpc, auth, access, revoke) {
   return { check };
 }
 
-// "Waiting for access", "Blocked", or an access-check error. Never shows any workspace data.
+// "Blocked", or an access-check error. Never shows any workspace data.
 function gateScreen(auth, a) {
-  const blocked = a.status === 'blocked';
-  const title = a.error ? 'Can’t open the workspace' : blocked ? 'This account is blocked' : 'Waiting for access';
-  const text = a.error ? esc(a.error)
-    : blocked ? 'Access to this workspace has been turned off for your account. Contact the workspace owner if you think this is a mistake.'
-    : 'Your account is registered. A Super Admin needs to give you access before you can use the workspace. This page updates by itself once they do.';
+  const blocked = !a.error && a.status === 'blocked';
+  const title = blocked ? 'This account is blocked' : 'Can’t open the workspace';
+  const text = blocked ? 'Access to this workspace has been turned off for your account. Contact the workspace owner if you think this is a mistake.'
+    : esc(a.error || 'Your account could not be checked. Try again in a moment.');
   root.innerHTML = `
     <main class="signin">
       <div class="signin-card card gate" role="${blocked ? 'alert' : 'status'}">
@@ -196,13 +198,6 @@ function gateScreen(auth, a) {
     window.localStorage.removeItem(ACTIVE_USER_KEY);
     await auth.logout();
   });
-  if (!blocked && !a.error && cfg.supabase) {
-    // Waiting: look again every 30 s, and open the workspace as soon as access is given.
-    const rpc = createRpc({ url: cfg.supabase.url, publishableKey: cfg.supabase.publishableKey, getToken: auth.getToken });
-    const t = setInterval(async () => {
-      try { const n = await rpc('my_access'); if (hasWorkspace(n) || n.status === 'blocked') { clearInterval(t); window.location.reload(); } } catch { /* retry later */ }
-    }, 30000);
-  }
 }
 
 // Cloud sync (Supabase) wiring: status for the UI, retries on reconnect/focus, conflict actions.

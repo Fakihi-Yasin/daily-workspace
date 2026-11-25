@@ -24,7 +24,6 @@ export function Users() {
   const rows = data.filter(u => (role === 'all' || u.role === role) && (status === 'all' || u.status === status)
     && (!needle || [u.name, u.email, u.user_id].some(v => v && v.toLowerCase().includes(needle))));
   const activeSupers = data.filter(u => u.role === 'super_admin' && u.status === 'active').length;
-  const waiting = data.filter(u => u.role === 'user' && u.status === 'active').length;
   const label = (u) => u.name || u.email || u.user_id;
 
   const setRoleFor = (u, next) => {
@@ -44,10 +43,10 @@ export function Users() {
   };
 
   return html`<div>
-    <header class="page-head"><h1>Users</h1><span class="muted">Everyone who signed up. New signups start as User (waiting for access).</span></header>
+    <header class="page-head"><h1>Users</h1><span class="muted">Everyone who signed up. New accounts start as User with their own private dashboard.</span></header>
     <div class="tiles" style="margin-bottom:16px">
       <div class="tile"><span class="v">${data.length}</span><span class="k">Accounts</span></div>
-      <div class="tile"><span class="v">${waiting}</span><span class="k">Waiting for access</span></div>
+      <div class="tile"><span class="v">${data.filter(u => u.role === 'admin').length}</span><span class="k">Admins</span></div>
       <div class="tile"><span class="v">${data.filter(u => u.status === 'blocked').length}</span><span class="k">Blocked</span></div>
       <div class="tile"><span class="v">${activeSupers}</span><span class="k">Active Super Admins</span></div>
     </div>

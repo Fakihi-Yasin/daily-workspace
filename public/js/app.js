@@ -72,7 +72,7 @@ function Account() {
   const u = window.__dash.user;
   return html`<div class="account">
     <span class="account-id" title=${u.email}>${u.email || u.name}</span>
-    ${window.__dash.role && html`<span class="account-role">${window.__dash.role === 'super_admin' ? 'Super Admin' : 'Admin'}</span>`}
+    ${window.__dash.role && html`<span class="account-role">${window.__dash.role === 'super_admin' ? 'Super Admin' : window.__dash.role === 'admin' ? 'Admin' : 'User'}</span>`}
     <button class="account-out" onClick=${() => window.__dash.logout()} title="Sign out" aria-label="Sign out"><${Icon} name="logout" size=${16} /><span>Sign out</span></button>
   </div>`;
 }

@@ -51,7 +51,7 @@ test('rollout: an account with a synced dashboard keeps access as Admin; nobody 
   assert.deepEqual(audit, [{ actor_id: 'migration', action: 'backfill', new_value: 'admin' }]);
 });
 
-test('every new signup is registered as User and gets no workspace, Team Work or directory access', async () => {
+test('every new signup is registered as User and opens its own dashboard at once, with no team creation or directory access', async () => {
   for (const k of ['SA', 'A', 'B', 'NEW']) {
     const r = await call(k, 'register_me');
     assert.equal(r.role, 'user');
@@ -61,14 +61,23 @@ test('every new signup is registered as User and gets no workspace, Team Work or
   await assert.rejects(call('NEW', 'register_me', { role: 'super_admin' }));
   assert.equal((await call('NEW', 'register_me')).role, 'user');
   assert.deepEqual(await call('NEW', 'my_access'), { registered: true, role: 'user', status: 'active' });
-  await refused(call('NEW', 'get_snapshot', { p_slot: 'real', p_with_data: true }));
-  await refused(call('NEW', 'save_snapshot', { p_slot: 'real', p_expected_rev: null, p_new_rev: 'nope-123', p_snapshot: snap('nope-123') }));
-  await refused(call('NEW', 'team_list', { p_scope: 'mine' }));
+  // Their own private dashboard works immediately: empty at first, then saved and read back.
+  assert.equal(await call('NEW', 'get_snapshot', { p_slot: 'real', p_with_data: true }), null);
+  assert.equal((await call('NEW', 'save_snapshot', { p_slot: 'real', p_expected_rev: null, p_new_rev: 'new-rev-1', p_snapshot: snap('new-rev-1') })).status, 'ok');
+  assert.equal((await call('NEW', 'get_snapshot', { p_slot: 'real', p_with_data: true })).snapshot.rev, 'new-rev-1');
+  // Team Work: no teams until someone adds them; creating teams stays with Admins.
+  assert.deepEqual(await call('NEW', 'team_list', { p_scope: 'mine' }), []);
+  assert.deepEqual(await call('NEW', 'team_stats'), { my_teams: 0 });
+  await refused(call('NEW', 'team_list', { p_scope: 'all' }), /super_admin_required/);
   await refused(call('NEW', 'team_create', { p_name: 'Sneaky' }));
   await refused(call('NEW', 'admin_list_users'));
+  await refused(call('NEW', 'admin_set_role', { p_user_id: NEW, p_role: 'super_admin' }));
+  await refused(call('NEW', 'admin_set_status', { p_user_id: LEGACY, p_status: 'blocked' }));
+  // Someone else's dashboard stays invisible.
+  assert.deepEqual((await pg.asRequest(who.NEW, (tx) => tx.query('select user_id from public.snapshots'))).rows, [{ user_id: NEW }]);
   // Direct table access through the API is closed, even with Supabase's default grants in place.
   await refused(pg.asRequest(who.NEW, (tx) => tx.query('select * from public.app_users')));
-  await refused(pg.asRequest(who.NEW, (tx) => tx.query("insert into public.snapshots (user_id, slot, rev, snapshot) values ($1, 'real', 'direct-1', $2)", [NEW, JSON.stringify(snap('direct-1'))])), /row-level security|permission denied/);
+  await refused(pg.asRequest(who.NEW, (tx) => tx.query("insert into public.snapshots (user_id, slot, rev, snapshot) values ($1, 'real', 'direct-1', $2)", [LEGACY, JSON.stringify(snap('direct-1'))])), /row-level security|permission denied/);
 });
 
 test('signed-out visitors can call nothing', async () => {
@@ -204,7 +213,7 @@ test('tasks: owner manages all; members manage tasks they created and update the
   await call('A', 'team_task_update', { p_task_id: taskOfB, p_patch: { assignee_id: A } });
   await call('A', 'team_task_update', { p_task_id: taskOfB, p_patch: { assignee_id: B } });
   // Outsiders and the read-only Super Admin can't touch tasks.
-  await assert.rejects(call('NEW', 'team_task_update', { p_task_id: taskForB, p_patch: { status: 'done' } }), /workspace_access_denied/);
+  await assert.rejects(call('NEW', 'team_task_update', { p_task_id: taskForB, p_patch: { status: 'done' } }), /Team not found/);
   await refused(call('SA', 'team_task_update', { p_task_id: taskForB, p_patch: { status: 'done' } }), /Only team members/);
   const t = await call('A', 'team_get', { p_team_id: TA });
   assert.deepEqual(t.tasks.map(k => [k.title, k.status, k.assignee && k.assignee.name]).sort(),
@@ -290,12 +299,56 @@ test('blocking B stops an already signed-in session on its next request; unblock
   assert.deepEqual((await call('B', 'team_list', { p_scope: 'mine' })).map(t => t.name), ['Bravo']);
 });
 
-test('demoting an Admin to User removes workspace and Team Work access; their personal data is untouched', async () => {
+test('demoting an Admin to User keeps their dashboard and teams, but not team management', async () => {
   await call('SA', 'admin_set_role', { p_user_id: B, p_role: 'user' });
-  await refused(call('B', 'team_list', { p_scope: 'mine' }));
-  await refused(call('B', 'get_snapshot', { p_slot: 'real', p_with_data: true }));
+  assert.equal((await call('B', 'get_snapshot', { p_slot: 'real', p_with_data: false })).rev, 'b-rev-0001');
+  assert.deepEqual((await call('B', 'team_list', { p_scope: 'mine' })).map(t => t.name), ['Bravo']);
+  await refused(call('B', 'team_create', { p_name: 'Another' }));
+  await refused(call('B', 'team_rename', { p_team_id: TB, p_name: 'Renamed' }));
   await call('SA', 'admin_set_role', { p_user_id: B, p_role: 'admin' });
   assert.equal((await call('B', 'get_snapshot', { p_slot: 'real', p_with_data: false })).rev, 'b-rev-0001');
+});
+
+test('a User added to a team works in it, and only in it; blocking them closes everything', async () => {
+  const U = 'auth0|usercarol00000000000000';
+  who.U = claimsFor(U, { email: 'carol@example.test', name: 'Carol' });
+  assert.equal((await call('U', 'register_me')).role, 'user');
+  await call('A', 'team_add_member', { p_team_id: TA, p_email: 'carol@example.test' });
+  assert.equal((await call('U', 'my_access')).role, 'user', 'joining a team does not change the role');
+  assert.deepEqual((await call('U', 'team_list', { p_scope: 'mine' })).map(t => [t.name, t.my_role]), [['Alpha', 'member']]);
+  const t = await call('U', 'team_get', { p_team_id: TA });
+  assert.equal(t.me.access, 'member');
+  const mine = (await call('U', 'team_task_create', { p_team_id: TA, p_title: 'Carol drafts', p_assignee_id: U, p_due_date: today })).id;
+  await call('U', 'team_task_update', { p_task_id: mine, p_patch: { status: 'done' } });
+  const sc = await call('U', 'team_scores', { p_team_id: TA, p_date: today, p_tz: 'UTC' });
+  assert.equal(sc.members.find(m => m.id === U).score, 100);
+  // Membership rules are the same as for any member.
+  const fromA = (await call('A', 'team_task_create', { p_team_id: TA, p_title: 'Alice keeps this' })).id;
+  await refused(call('U', 'team_task_update', { p_task_id: fromA, p_patch: { status: 'done' } }), /created or that are assigned/);
+  await refused(call('U', 'team_task_delete', { p_task_id: fromA }), /owner or the task's creator/);
+  await refused(call('U', 'team_add_member', { p_team_id: TA, p_email: 'newbie@example.test' }));
+  await refused(call('U', 'team_rename', { p_team_id: TA, p_name: 'Mine now' }));
+  await refused(call('U', 'team_project_save', { p_team_id: TA, p_project_id: null, p_title: 'x', p_notes: null }));
+  // An unrelated team looks like it doesn't exist.
+  await assert.rejects(call('U', 'team_get', { p_team_id: TB }), (e) => /Team not found/.test(e.message) && e.code === 'PT404');
+  await assert.rejects(call('U', 'team_scores', { p_team_id: TB, p_date: today, p_tz: 'UTC' }), /Team not found/);
+  await refused(call('U', 'team_list', { p_scope: 'all' }), /super_admin_required/);
+  // Private dashboards: their own only.
+  assert.equal(await call('U', 'get_snapshot', { p_slot: 'real', p_with_data: true }), null);
+  assert.deepEqual((await pg.asRequest(who.U, (tx) => tx.query('select user_id from public.snapshots'))).rows, []);
+  // No user management.
+  await refused(call('U', 'admin_list_users'));
+  await refused(call('U', 'admin_set_role', { p_user_id: U, p_role: 'admin' }));
+  // Blocked: nothing at all, same token.
+  await call('SA', 'admin_set_status', { p_user_id: U, p_status: 'blocked' });
+  await refused(call('U', 'get_snapshot', { p_slot: 'real', p_with_data: true }), /workspace_access_denied/);
+  await refused(call('U', 'save_snapshot', { p_slot: 'real', p_expected_rev: null, p_new_rev: 'blocked-1', p_snapshot: snap('blocked-1') }), /workspace_access_denied/);
+  await refused(call('U', 'team_get', { p_team_id: TA }), /workspace_access_denied/);
+  await refused(call('U', 'team_list', { p_scope: 'mine' }), /workspace_access_denied/);
+  await refused(call('U', 'team_task_create', { p_team_id: TA, p_title: 'x' }), /workspace_access_denied/);
+  await refused(pg.asRequest(who.U, (tx) => tx.query("insert into public.snapshots (user_id, slot, rev, snapshot) values ($1, 'real', 'direct-2', $2)", [U, JSON.stringify(snap('direct-2'))])), /row-level security|permission denied/);
+  assert.equal((await call('U', 'my_access')).status, 'blocked');
+  await call('A', 'team_remove_member', { p_team_id: TA, p_user_id: U });
 });
 
 test('personal snapshots stay private: nobody reads another account’s dashboard, Super Admin included', async () => {

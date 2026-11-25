@@ -244,15 +244,23 @@ main { min-width: 0; padding: 28px 36px 80px; max-width: 1600px; width: 100%; }
 /* ---------- forms ---------- */
 label.field { display: flex; flex-direction: column; gap: 5px; font-weight: 600; font-size: 13px; }
 .field .hint, .hint { font-weight: 450; font-size: 12.5px; color: var(--muted); }
-input[type=text], input[type=url], input[type=number], input[type=date], input[type=time], input[type=month], input[type=search], select, textarea {
+input[type=text], input[type=email], input[type=url], input[type=number], input[type=date], input[type=time], input[type=month], input[type=search], select, textarea {
   border: 1px solid var(--line-2); background: var(--card); border-radius: 9px; padding: 8px 10px; min-height: 38px; font-size: 14px; width: 100%; }
 textarea { min-height: 80px; resize: vertical; }
 input[type=number] { width: 90px; }
 input:focus, select:focus, textarea:focus { border-color: var(--focus-ring); outline: none; box-shadow: 0 0 0 3px rgba(2, 185, 2, .25); }
 fieldset { border: 0; padding: 0; margin: 0; }
 legend { font-weight: 600; font-size: 13px; margin-bottom: 6px; padding: 0; }
-.effect { background: var(--accent-soft); border-radius: 12px; padding: 12px; }
-.effect .hint { margin-top: 8px; color: var(--ink-2); }
+.effect { background: var(--accent-soft); border-radius: 12px; padding: 14px 16px; }
+/* float keeps the legend inside the box instead of on its top edge */
+.effect legend { float: left; width: 100%; margin-bottom: 10px; }
+.effect legend + * { clear: both; }
+.effect-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; }
+.effect-row .seg { background: var(--card); }
+.effect-row .seg button.on { background: var(--solid); color: var(--solid-fg); }
+input[type=date].effect-date { width: auto; min-width: 170px; }
+input[type=date].effect-date.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.effect .hint { margin: 10px 0 0; color: var(--ink-2); }
 .daypick { display: inline-flex; gap: 4px; }
 .daypick button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--card); font-weight: 700; cursor: pointer; }
 .daypick button.on { background: var(--solid); color: var(--solid-fg); border-color: var(--solid); }
@@ -726,6 +734,12 @@ main { padding-bottom: 32px; }
 .team-name { font-size: 16px; overflow-wrap: anywhere; }
 .team-summary { margin-bottom: 18px; }
 .team-new-task { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.add-member { margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
+.add-member > label { font-weight: 600; font-size: 13px; }
+.add-member-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.add-member-row input { flex: 1 1 260px; width: auto; }
+.add-member-row .btn { flex: 0 0 auto; }
+.add-member .hint { margin: 0; }
 .team-new-task select, .team-new-task input[type=date] { width: auto; }
 .board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .board-col { background: var(--track); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 80px; }
