@@ -172,7 +172,10 @@ const ICONS = {
   monitor: 'M3 4h18v12H3zM8 20h8M12 16v4',
   list: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01', ban: 'M12 21a9 9 0 100-18 9 9 0 000 18zM5.6 5.6l12.8 12.8',
   history: 'M3 12a9 9 0 103-6.7L3 8M3 3v5h5M12 7v5l3 2',
-  logout: 'M15 4h4v16h-4M10 17l5-5-5-5M15 12H3', clock: 'M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 2', note: 'M5 4h14v16H5zM9 9h6M9 13h6',
+  logout: 'M15 4h4v16h-4M10 17l5-5-5-5M15 12H3',
+  team: 'M9 11a4 4 0 100-8 4 4 0 000 8zM2 21v-1a6 6 0 0112 0v1M16 3.5a4 4 0 010 7.5M22 21v-1a6 6 0 00-4-5.6',
+  users: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM12 12a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 16.5c1-1.5 2.4-2 4-2s3 .5 4 2',
+  search: 'M11 18a7 7 0 100-14 7 7 0 000 14zM21 21l-5-5', edit: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4', clock: 'M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 2', note: 'M5 4h14v16H5zM9 9h6M9 13h6',
 };
 export const Icon = ({ name, size = 18 }) => html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${ICONS[name] || ''} /></svg>`;
 

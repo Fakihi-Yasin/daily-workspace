@@ -14,11 +14,12 @@
     "build": "node scripts/build.js",
     "build:test": "AUTH_PROVIDER=test node scripts/build.js",
     "preview": "node scripts/preview.js dist 4322",
-    "test": "node --test test/flows.test.js test/local-backend.test.js test/cloud-sync.test.js test/v2-features.test.js",
+    "test": "node --test test/flows.test.js test/local-backend.test.js test/cloud-sync.test.js test/v2-features.test.js test/roles-teams.test.js",
     "check:rls": "node scripts/check-rls.mjs"
   },
   "devDependencies": {
     "@auth0/auth0-spa-js": "2.1.3",
+    "@electric-sql/pglite": "0.6.0",
     "esbuild": "0.24.0",
     "sql.js": "1.11.0"
   }

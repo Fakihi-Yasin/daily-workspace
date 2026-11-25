@@ -266,3 +266,20 @@ test('a user action first fetches newer cloud data when it has not been checked 
 });
 
 function addDays(d, n) { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); }
+
+test('a blocked account stops syncing at once: nothing retried, the device keeps its changes and sync state', async () => {
+  const srv = fakeServer();
+  const a = await device(srv);
+  await a.req('POST', '/api/projects', { name: 'Kept locally', status: 'in_progress' });
+  assert.equal(await a.store.push(), 'synced');
+  const before = a.ls.getItem(`dash.v2.u.${encodeURIComponent(ME)}.real.sync`);
+  // The account gets blocked: every call is refused with `denied`.
+  const deny = async () => { throw Object.assign(new Error('This account is blocked or waiting for access.'), { denied: true, status: 403 }); };
+  const remote = srv.remoteFor(ME);
+  remote.head = deny; remote.get = deny; remote.save = deny;
+  const b = createCloudStore({ ls: a.ls, userId: ME, remote, localStore: createLocalStore(a.ls), timers: noTimers });
+  await b.init();
+  assert.equal(b.status().state, 'denied');
+  assert.equal(await b.pull(), 'denied', 'stopped: no more requests');
+  assert.equal(a.ls.getItem(`dash.v2.u.${encodeURIComponent(ME)}.real.sync`), before, 'sync metadata untouched (no fake "cloud is empty")');
+});

@@ -4,8 +4,9 @@
 //   SUPABASE_URL=https://<ref>.supabase.co SUPABASE_PUBLISHABLE_KEY=sb_publishable_… \
 //   TOKEN_A=<Auth0 access token of test account A> TOKEN_B=<… of test account B> npm run check:rls
 //
-// Without TOKEN_A/TOKEN_B only the signed-out checks run. Use TEST accounts: account A's snapshot
-// gets a new revision (same contents). Keys and tokens are never printed.
+// Without TOKEN_A/TOKEN_B only the signed-out checks run. Use TEST accounts that are Admins in the
+// Preview project: account A's snapshot gets a new revision (same contents). Keys and tokens are
+// never printed. Run it against Preview only, never Production.
 const url = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const key = process.env.SUPABASE_PUBLISHABLE_KEY || '';
 const A = process.env.TOKEN_A || '', B = process.env.TOKEN_B || '';
@@ -36,6 +37,14 @@ console.log('Signed-out visitor (publishable key, no sign-in):');
   ok(denied(w), `cannot insert (HTTP ${w.status})`);
   const f = await rest('/rpc/save_snapshot', { method: 'POST', body: { p_slot: 'real', p_expected_rev: null, p_new_rev: 'rls-check-anon', p_snapshot: snap } });
   ok(denied(f) || f.status === 404, `cannot call save_snapshot (HTTP ${f.status})`);
+  for (const fn of ['register_me', 'my_access', 'admin_list_users', 'team_list', 'get_snapshot']) {
+    const r = await rest('/rpc/' + fn, { method: 'POST', body: {} });
+    ok(denied(r) || r.status === 404, `cannot call ${fn} (HTTP ${r.status})`);
+  }
+  for (const t of ['app_users', 'user_audit', 'teams', 'team_members', 'team_tasks', 'team_future_projects', 'team_events']) {
+    const r = await rest(`/${t}?select=*&limit=1`);
+    ok(denied(r) || (Array.isArray(r.json) && r.json.length === 0), `cannot read ${t} (HTTP ${r.status})`);
+  }
   const forged = await rest('/snapshots?select=rev', { token: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4Iiwicm9sZSI6ImF1dGhlbnRpY2F0ZWQifQ.c2lnbmF0dXJl' });
   ok(forged.status === 401 || denied(forged), `a forged token is rejected (HTTP ${forged.status})`);
 }
@@ -52,6 +61,20 @@ if (A && B) {
   ok(saved.status === 200 && saved.json && saved.json.status === 'ok', `A can save its own snapshot (${saved.json && saved.json.status})`);
   const stale = await rest('/rpc/save_snapshot', { token: A, method: 'POST', body: { p_slot: 'real', p_expected_rev: 'not-the-current-rev', p_new_rev: newRev + 'x', p_snapshot: snap } });
   ok(stale.json && stale.json.status === 'conflict', 'a save based on an old revision is refused (no silent overwrite)');
+
+  console.log('\nRoles and teams (A and B must be Admins of the Preview project):');
+  for (const t of ['app_users', 'user_audit', 'teams', 'team_members', 'team_tasks']) {
+    const r = await rest(`/${t}?select=*&limit=1`, { token: A });
+    ok(denied(r) || (Array.isArray(r.json) && r.json.length === 0), `A cannot read ${t} directly (HTTP ${r.status})`);
+  }
+  const users = await rest('/rpc/admin_list_users', { token: A, method: 'POST', body: {} });
+  const me = (await rest('/rpc/my_access', { token: A, method: 'POST', body: {} })).json || {};
+  if (me.role !== 'super_admin') ok(denied(users), `A (an Admin) cannot list users (HTTP ${users.status})`);
+  const role = await rest('/rpc/admin_set_role', { token: B, method: 'POST', body: { p_user_id: bId, p_role: 'super_admin' } });
+  ok(denied(role) || (role.json && /own role/.test(role.json.message || '')), `B cannot promote itself (HTTP ${role.status})`);
+  const bTeams = (await rest('/rpc/team_list', { token: B, method: 'POST', body: { p_scope: 'all' } }));
+  const bMe = (await rest('/rpc/my_access', { token: B, method: 'POST', body: {} })).json || {};
+  if (bMe.role !== 'super_admin') ok(denied(bTeams), `B (an Admin) cannot list all teams (HTTP ${bTeams.status})`);
 
   console.log('\nAccount B (another signed-in user):');
   const all = (await rest('/snapshots?select=user_id,rev', { token: B })).json || [];

@@ -7,6 +7,13 @@ import { Formation } from './formation.js';
 import { Challenges } from './challenges.js';
 import { Stats } from './stats.js';
 import { MiniTimer } from './focus.js';
+import { TeamWork } from './teamwork.js';
+import { Users } from './users.js';
+
+// Team Work and Users exist only in the synced web build: the database enforces who may use them
+// (window.__dash.rpc); these checks only decide what the sidebar shows.
+const hasTeams = () => !!(window.__dash && window.__dash.rpc);
+const isSuperAdmin = () => !!(window.__dash && window.__dash.rpc && window.__dash.role === 'super_admin');
 
 const ROUTES = [
   ['today', 'Today', 'today', Today],
@@ -14,27 +21,39 @@ const ROUTES = [
   ['youtube', 'YouTube', 'youtube', YouTube, { hidden: true }], // page and data kept; reachable at #/youtube, not in the sidebar
   ['learning', 'Learning', 'formation', Formation],
   ['challenges', 'Challenges', 'challenges', Challenges],
+  ['teams', 'Team Work', 'team', TeamWork, { when: hasTeams }],
   ['stats', 'Stats', 'stats', Stats],
+  ['users', 'Users', 'users', Users, { when: isSuperAdmin }],
   ['settings', 'Settings', 'settings', Settings],
 ];
+const allowed = (r) => !(r[4] && r[4].when) || r[4].when();
+
+function NotAvailable({ superOnly }) {
+  return html`<div><header class="page-head"><h1>Not available</h1></header>
+    <p class="muted">${superOnly ? 'This page is only available to Super Admins.' : 'This page isn’t available in this version of the dashboard.'}</p>
+    <p><a class="btn" href="#/today">Back to Today</a></p></div>`;
+}
 
 function useHash() {
-  const read = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || 'today');
+  const read = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || 'today'); // e.g. "teams/<id>"
   const [h, set] = useState(read());
   useEffect(() => { const f = () => { set(read()); window.scrollTo(0, 0); }; addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
   return h;
 }
 
 function App() {
-  const route = useHash();
+  const path = useHash();
+  const [route, ...rest] = path.split('/');
   const { data: modeData } = useResource('/api/mode');
-  const r = ROUTES.find(x => x[0] === route) || ROUTES[0];
-  const Page = r[3];
+  const known = ROUTES.find(x => x[0] === route);
+  const r = known || ROUTES[0];
+  const blocked = known && !allowed(known); // typed URL to a page this account can't use
+  const Page = blocked ? NotAvailable : r[3];
   useEffect(() => { if (route !== 'today') document.title = `${r[1]} · Dashboard`; }, [route]);
   return html`<div class="shell">
     <nav class="side" aria-label="Main navigation">
       <div class="brand"><i>✓</i><span>Dashboard</span></div>
-      ${ROUTES.filter(r => !(r[4] && r[4].hidden)).map(([key, label, icon]) => html`<a class=${'nav-link' + (key === r[0] ? ' on' : '')} href=${'#/' + key} aria-current=${key === r[0] ? 'page' : undefined} title=${label}>
+      ${ROUTES.filter(r => !(r[4] && r[4].hidden) && allowed(r)).map(([key, label, icon]) => html`<a class=${'nav-link' + (key === r[0] ? ' on' : '')} href=${'#/' + key} aria-current=${key === r[0] ? 'page' : undefined} title=${label}>
         <${Icon} name=${icon} /><span>${label}</span></a>`)}
       <div class="side-foot">
         <${MiniTimer} />
@@ -44,7 +63,7 @@ function App() {
         ${window.__dash && html`<${Account} />`}
       </div>
     </nav>
-    <main id="main">${window.__dash && window.__dash.sync && html`<${SyncBanner} />`}<${Page} key=${r[0]} /></main>
+    <main id="main">${window.__dash && window.__dash.sync && html`<${SyncBanner} />`}<${Page} key=${r[0]} sub=${rest.join('/')} superOnly=${r[0] === 'users'} /></main>
     <${Toasts} />
   </div>`;
 }
@@ -53,6 +72,7 @@ function Account() {
   const u = window.__dash.user;
   return html`<div class="account">
     <span class="account-id" title=${u.email}>${u.email || u.name}</span>
+    ${window.__dash.role && html`<span class="account-role">${window.__dash.role === 'super_admin' ? 'Super Admin' : 'Admin'}</span>`}
     <button class="account-out" onClick=${() => window.__dash.logout()} title="Sign out" aria-label="Sign out"><${Icon} name="logout" size=${16} /><span>Sign out</span></button>
   </div>`;
 }
@@ -64,7 +84,7 @@ export function useSync() {
   useEffect(() => (sync ? sync.subscribe(() => set(sync.status())) : undefined), []);
   return [s, sync];
 }
-const SYNC_LABEL = { idle: 'Saving…', saving: 'Saving…', synced: 'Synced', offline: 'Offline', error: 'Sync failed', signin: 'Sign in to sync', conflict: 'Sync conflict' };
+const SYNC_LABEL = { idle: 'Saving…', saving: 'Saving…', synced: 'Synced', offline: 'Offline', error: 'Sync failed', signin: 'Sign in to sync', conflict: 'Sync conflict', denied: 'No access' };
 
 function SyncBadge() {
   const [s] = useSync();

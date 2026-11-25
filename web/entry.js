@@ -5,7 +5,9 @@ import { createAuth } from '@auth-provider';
 import { createLocalBackend } from './local-backend.js';
 import { createLocalStore, decode, ACTIVE_USER_KEY } from './storage.js';
 import { createCloudStore, createSupabaseRemote } from './cloud-store.js';
+import { createRpc } from './supabase-rpc.js';
 import { mount } from '../public/js/app.js';
+import { render } from 'preact';
 import { downloadJson, bus } from '../public/js/lib.js';
 
 const cfg = window.__DASH_CONFIG || {};
@@ -47,13 +49,24 @@ async function start() {
   }
   if (!auth.user) return signInScreen(auth, auth.error);
 
+  // With Supabase, the database decides who may use the workspace (role + blocked status).
+  let rpc = null, access = null;
+  if (cfg.supabase) {
+    rpc = createRpc({ url: cfg.supabase.url, publishableKey: cfg.supabase.publishableKey, getToken: auth.getToken });
+    root.innerHTML = '<main class="signin"><p class="muted">Checking access…</p></main>';
+    access = await checkAccess(rpc, auth);
+    if (!access) return;
+    if (!hasWorkspace(access)) return gateScreen(auth, access);
+  }
+
   const local = createLocalStore(window.localStorage);
   const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   let storage = local;
   let sync = null;
+  let monitor = null;
   if (cfg.supabase) {
     root.innerHTML = '<main class="signin"><p class="muted">Loading your data…</p></main>';
-    sync = createSyncController(auth, local);
+    sync = createSyncController(auth, local, rpc, () => monitor && monitor.check());
     storage = sync.store;
     await storage.init();
     storage.start();
@@ -78,6 +91,13 @@ async function start() {
   window.__dash = {
     backend,
     user: auth.user,
+    // Role from the database ('admin' | 'super_admin'), or null without Supabase (no roles, no Team Work).
+    role: access ? access.role : null,
+    // Database functions for Team Work and User Management; a refusal re-checks this account's access.
+    rpc: rpc ? async (name, args) => {
+      try { return await rpc(name, args); }
+      catch (e) { if (e.denied) monitor && monitor.check(); throw e; }
+    } : null,
     provider: auth.provider,
     storageKind: sync ? 'cloud' : 'browser',
     sync: sync && sync.api,
@@ -95,16 +115,104 @@ async function start() {
   };
   root.innerHTML = ''; // remove the full-height "Loading…" placeholder, or it stays under the dashboard as empty scroll space
   mount(root);
+
+  if (rpc) {
+    // A role change or a block applies to this already-open browser on its next check.
+    monitor = startAccessMonitor(rpc, auth, access, (next) => {
+      render(null, root); // unmount the dashboard first: nothing of it stays on screen
+      if (sync) storage.stop();
+      backend.close();
+      window.__dash = null;
+      gateScreen(auth, next);
+    });
+  }
+}
+
+const hasWorkspace = (a) => a && a.status === 'active' && (a.role === 'admin' || a.role === 'super_admin');
+const accessKey = (auth) => `dash.v2.u.${encodeURIComponent(auth.user.id)}.access`;
+
+// Registers this account on first sign-in (as 'user') and returns its role and status. Offline, the
+// last known answer for this account in this browser is used so the personal dashboard still opens
+// from its local copy; the database re-checks on every sync request anyway.
+async function checkAccess(rpc, auth) {
+  try {
+    const me = await rpc('register_me');
+    window.localStorage.setItem(accessKey(auth), JSON.stringify({ role: me.role, status: me.status }));
+    return me;
+  } catch (e) {
+    if (e.offline) {
+      let cached = null;
+      try { cached = JSON.parse(window.localStorage.getItem(accessKey(auth))); } catch { /* none */ }
+      if (cached) return { ...cached, offline: true };
+    }
+    if (e.auth) { signInScreen(auth, 'Your session expired. Sign in again.'); return null; }
+    gateScreen(auth, { error: e.offline ? 'You are offline, and this browser has never checked your access. Connect and try again.' : 'Could not check your access: ' + (e.message || e) });
+    return null;
+  }
+}
+
+function startAccessMonitor(rpc, auth, access, revoke) {
+  let running = false, done = false;
+  async function check() {
+    if (running || done) return;
+    running = true;
+    try {
+      const a = await rpc('my_access');
+      window.localStorage.setItem(accessKey(auth), JSON.stringify({ role: a.role, status: a.status }));
+      if (!hasWorkspace(a)) { done = true; clearInterval(timer); revoke(a); }
+      else if (a.role !== access.role) { done = true; window.location.reload(); } // Admin ⇄ Super Admin: rebuild the sidebar
+    } catch { /* offline or a transient error: the next check retries */ }
+    finally { running = false; }
+  }
+  const timer = setInterval(check, 20000);
+  window.addEventListener('focus', check);
+  window.addEventListener('online', check);
+  return { check };
+}
+
+// "Waiting for access", "Blocked", or an access-check error. Never shows any workspace data.
+function gateScreen(auth, a) {
+  const blocked = a.status === 'blocked';
+  const title = a.error ? 'Can’t open the workspace' : blocked ? 'This account is blocked' : 'Waiting for access';
+  const text = a.error ? esc(a.error)
+    : blocked ? 'Access to this workspace has been turned off for your account. Contact the workspace owner if you think this is a mistake.'
+    : 'Your account is registered. A Super Admin needs to give you access before you can use the workspace. This page updates by itself once they do.';
+  root.innerHTML = `
+    <main class="signin">
+      <div class="signin-card card gate" role="${blocked ? 'alert' : 'status'}">
+        <div class="brand signin-brand"><i>✓</i><span>Dashboard</span></div>
+        <h1>${title}</h1>
+        <p class="muted">${text}</p>
+        <p class="gate-who"><strong>${esc(auth.user.name || auth.user.email || '')}</strong>${auth.user.email && auth.user.email !== auth.user.name ? `<br><span class="muted">${esc(auth.user.email)}</span>` : ''}</p>
+        <div class="row wrap">
+          ${blocked ? '' : '<button id="gate-retry" class="btn primary">Check again</button>'}
+          <button id="gate-out" class="btn">Sign out</button>
+        </div>
+      </div>
+    </main>`;
+  const retry = document.getElementById('gate-retry');
+  if (retry) retry.addEventListener('click', () => window.location.reload());
+  document.getElementById('gate-out').addEventListener('click', async () => {
+    window.localStorage.removeItem(ACTIVE_USER_KEY);
+    await auth.logout();
+  });
+  if (!blocked && !a.error && cfg.supabase) {
+    // Waiting: look again every 30 s, and open the workspace as soon as access is given.
+    const rpc = createRpc({ url: cfg.supabase.url, publishableKey: cfg.supabase.publishableKey, getToken: auth.getToken });
+    const t = setInterval(async () => {
+      try { const n = await rpc('my_access'); if (hasWorkspace(n) || n.status === 'blocked') { clearInterval(t); window.location.reload(); } } catch { /* retry later */ }
+    }, 30000);
+  }
 }
 
 // Cloud sync (Supabase) wiring: status for the UI, retries on reconnect/focus, conflict actions.
-function createSyncController(auth, local) {
+function createSyncController(auth, local, rpc, onDenied) {
   const listeners = new Set();
   let last = { state: 'idle' };
-  const remote = createSupabaseRemote({ url: cfg.supabase.url, publishableKey: cfg.supabase.publishableKey, getToken: auth.getToken });
+  const remote = createSupabaseRemote({ rpc });
   const store = createCloudStore({
     ls: window.localStorage, userId: auth.user.id, remote, localStore: local,
-    onChange: (s) => { last = s; listeners.forEach(fn => fn(s)); if (s.pulled) bus.emit(false); },
+    onChange: (s) => { last = s; listeners.forEach(fn => fn(s)); if (s.pulled) bus.emit(false); if (s.state === 'denied') onDenied(); },
   });
   const keepCopy = (snap, which) => downloadJson(decode(snap), `dashboard-${which}-version-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`);
   const refresh = () => { bus.emit(false); };
