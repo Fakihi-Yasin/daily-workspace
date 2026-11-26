@@ -33,6 +33,12 @@ before(async () => {
 after(() => pg && pg.close());
 
 const call = (as, fn, args) => pg.rpc(who[as] || as, fn, args);
+// The invite flow, as /api/invite runs it: create (owner) → email sent → mark sent → accept (invitee).
+async function invite(owner, teamId, email, invitee) {
+  const inv = await call(owner, 'team_invite_create', { p_team_id: teamId, p_email: email });
+  await call(owner, 'team_invite_mark', { p_invite_id: inv.id, p_status: 'sent' });
+  return invitee ? call(invitee, 'team_invite_accept', { p_token: inv.token }) : inv;
+}
 async function refused(p, re = /workspace_access_denied|super_admin_required|permission denied|not signed in/) {
   await assert.rejects(p, (e) => { assert.match(e.message, re); return true; });
 }
@@ -170,14 +176,19 @@ test('Admins create private teams; each sees only their own; creating a team gra
   await assert.rejects(call('SA', 'team_task_create', { p_team_id: TA, p_title: 'x' }), /Only team members/);
 });
 
-test('adding Admin B to team A grants access to that team only; members cannot manage membership', async () => {
-  await assert.rejects(call('A', 'team_add_member', { p_team_id: TA, p_email: 'nobody@example.test' }), /No registered account/);
-  // An unverified address never matches (nobody can claim a friend's email by signing up with it).
-  await call(claimsFor('auth0|impostor0000000000000', { email: 'friend@example.test', verified: false }), 'register_me');
-  await assert.rejects(call('A', 'team_add_member', { p_team_id: TA, p_email: 'friend@example.test' }), /No registered account/);
-  const added = await call('A', 'team_add_member', { p_team_id: TA, p_email: ' BOB@example.test ' });
-  assert.equal(added.id, B);
-  await assert.rejects(call('A', 'team_add_member', { p_team_id: TA, p_email: 'bob@example.test' }), /Already a member/);
+test('inviting Admin B to team A grants access to that team only; members cannot manage membership', async () => {
+  // Admins have no directory lookup any more: adding by email or id is a Super Admin tool.
+  await refused(call('A', 'team_add_member', { p_team_id: TA, p_email: 'bob@example.test' }), /super_admin_required/);
+  await refused(call('A', 'team_add_member_id', { p_team_id: TA, p_user_id: B }), /super_admin_required/);
+  // An unverified address never joins (nobody can claim a friend's email by signing up with it).
+  const imp = claimsFor('auth0|impostor0000000000000', { email: 'friend@example.test', verified: false });
+  await call(imp, 'register_me');
+  const forFriend = await invite('A', TA, 'friend@example.test');
+  await assert.rejects(call(imp, 'team_invite_accept', { p_token: forFriend.token }), /Confirm your email/);
+  await call('A', 'team_invite_revoke', { p_invite_id: forFriend.id });
+  const joined = await invite('A', TA, ' BOB@example.test ', 'B');
+  assert.equal(joined.team_id, TA);
+  await assert.rejects(call('A', 'team_invite_create', { p_team_id: TA, p_email: 'bob@example.test' }), /already in this team/);
 
   assert.deepEqual((await call('B', 'team_list', { p_scope: 'mine' })).map(t => [t.name, t.my_role]), [['Alpha', 'member'], ['Bravo', 'owner']]);
   assert.deepEqual(await call('B', 'team_stats'), { my_teams: 2 });
@@ -187,7 +198,8 @@ test('adding Admin B to team A grants access to that team only; members cannot m
   // A still doesn't see B's other team.
   await assert.rejects(call('A', 'team_get', { p_team_id: TB }), /Team not found/);
   // Members can't change membership, rename or delete the team.
-  await refused(call('B', 'team_add_member', { p_team_id: TA, p_email: 'newbie@example.test' }), /Only the team owner/);
+  await refused(call('B', 'team_add_member', { p_team_id: TA, p_email: 'newbie@example.test' }), /super_admin_required/);
+  await refused(call('B', 'team_invite_create', { p_team_id: TA, p_email: 'newbie@example.test' }), /Only the team owner/);
   await refused(call('B', 'team_remove_member', { p_team_id: TA, p_user_id: A }), /Only the team owner/);
   await refused(call('B', 'team_rename', { p_team_id: TA, p_name: 'Mine now' }), /Only the team owner/);
   await refused(call('B', 'team_delete', { p_team_id: TA }), /Only the team owner/);
@@ -295,8 +307,10 @@ test('blocking B stops an already signed-in session on its next request; unblock
   assert.equal((await call('B', 'register_me')).status, 'blocked');
   const audit = (await call('SA', 'admin_audit', { p_limit: 5 }))[0];
   assert.deepEqual([audit.actor.id, audit.target.id, audit.action, audit.new], [SA, B, 'status', 'blocked']);
-  // A blocked account can't be added to a team.
-  await assert.rejects(call('A', 'team_add_member', { p_team_id: TA, p_email: 'bob@example.test' }), /No registered account/);
+  // A blocked account can't join a team by invite.
+  const inv = await invite('A', TA, 'bob@example.test');
+  await refused(call('B', 'team_invite_accept', { p_token: inv.token }), /workspace_access_denied/);
+  await call('A', 'team_invite_revoke', { p_invite_id: inv.id });
 
   await call('SA', 'admin_set_status', { p_user_id: B, p_status: 'active' });
   assert.equal((await call('B', 'get_snapshot', { p_slot: 'real', p_with_data: false })).rev, 'b-rev-0001', 'data intact after unblocking');
@@ -318,7 +332,7 @@ test('a User added to a team works in it, and only in it; blocking them closes e
   who.U = claimsFor(U, { email: 'carol@example.test', name: 'Carol' });
   assert.equal((await call('U', 'register_me')).role, 'admin');
   await call('SA', 'admin_set_role', { p_user_id: U, p_role: 'user' }); // made a User by the Super Admin
-  await call('A', 'team_add_member', { p_team_id: TA, p_email: 'carol@example.test' });
+  await invite('A', TA, 'carol@example.test', 'U');
   assert.equal((await call('U', 'my_access')).role, 'user', 'joining a team does not change the role');
   assert.deepEqual((await call('U', 'team_list', { p_scope: 'mine' })).map(t => [t.name, t.my_role]), [['Alpha', 'member']]);
   const t = await call('U', 'team_get', { p_team_id: TA });
@@ -332,6 +346,7 @@ test('a User added to a team works in it, and only in it; blocking them closes e
   await refused(call('U', 'team_task_update', { p_task_id: fromA, p_patch: { status: 'done' } }), /created or that are assigned/);
   await refused(call('U', 'team_task_delete', { p_task_id: fromA }), /owner or the task's creator/);
   await refused(call('U', 'team_add_member', { p_team_id: TA, p_email: 'newbie@example.test' }));
+  await refused(call('U', 'team_invite_create', { p_team_id: TA, p_email: 'newbie@example.test' }));
   await refused(call('U', 'team_rename', { p_team_id: TA, p_name: 'Mine now' }));
   await refused(call('U', 'team_project_save', { p_team_id: TA, p_project_id: null, p_title: 'x', p_notes: null }));
   // An unrelated team looks like it doesn't exist.
@@ -373,26 +388,31 @@ test('team names are unique per owner; two owners may share a name', async () =>
   await call('B', 'team_delete', { p_team_id: same });
 });
 
-test('the team owner picks new members from the list of active accounts', async () => {
+test('only a Super Admin who owns the team picks new members from the list of active accounts', async () => {
   const D = 'auth0|userdave000000000000000';
   who.D = claimsFor(D, { email: 'dave@example.test', name: 'Dave' });
   await call('D', 'register_me');
-  const list = await call('A', 'team_member_candidates', { p_team_id: TA });
+  // A regular Admin owner gets no list, can't add by id, and can't probe emails.
+  await refused(call('A', 'team_member_candidates', { p_team_id: TA }), /super_admin_required/);
+  await refused(call('A', 'team_add_member_id', { p_team_id: TA, p_user_id: D }), /super_admin_required/);
+  await refused(call('A', 'team_add_member', { p_team_id: TA, p_email: 'dave@example.test' }), /super_admin_required/);
+  const TS = (await call('SA', 'team_create', { p_name: 'Super team' })).id;
+  const list = await call('SA', 'team_member_candidates', { p_team_id: TS });
   const ids = list.map(u => u.id);
-  assert.ok(ids.includes(D) && !ids.includes(A), 'lists accounts not yet in the team');
+  assert.ok(ids.includes(D) && !ids.includes(SA), 'lists accounts not yet in the team');
   assert.ok(list.every(u => 'email' in u && 'name' in u && !('role' in u)), 'name and email only, no role');
   await call('SA', 'admin_set_status', { p_user_id: D, p_status: 'blocked' });
-  assert.ok(!(await call('A', 'team_member_candidates', { p_team_id: TA })).some(u => u.id === D), 'blocked accounts are not listed');
-  await assert.rejects(call('A', 'team_add_member_id', { p_team_id: TA, p_user_id: D }), /No active account/);
+  assert.ok(!(await call('SA', 'team_member_candidates', { p_team_id: TS })).some(u => u.id === D), 'blocked accounts are not listed');
+  await assert.rejects(call('SA', 'team_add_member_id', { p_team_id: TS, p_user_id: D }), /No active account/);
   await call('SA', 'admin_set_status', { p_user_id: D, p_status: 'active' });
-  assert.equal((await call('A', 'team_add_member_id', { p_team_id: TA, p_user_id: D })).name, 'Dave');
-  await assert.rejects(call('A', 'team_add_member_id', { p_team_id: TA, p_user_id: D }), /Already a member/);
-  // Only the owner: members, other Admins and the read-only Super Admin can't list or add.
-  await refused(call('D', 'team_member_candidates', { p_team_id: TA }), /Only the team owner/);
-  await assert.rejects(call('B', 'team_member_candidates', { p_team_id: TA }), /Team not found/);
+  assert.equal((await call('SA', 'team_add_member_id', { p_team_id: TS, p_user_id: D })).name, 'Dave');
+  await assert.rejects(call('SA', 'team_add_member_id', { p_team_id: TS, p_user_id: D }), /Already a member/);
+  assert.equal((await call('D', 'my_access')).role, 'admin', 'joining a team does not change the role');
+  // Even a Super Admin only adds to teams they own.
   await refused(call('SA', 'team_add_member_id', { p_team_id: TA, p_user_id: B }), /Only the team owner/);
-  await refused(pg.rpc(null, 'team_member_candidates', { p_team_id: TA }));
-  await call('A', 'team_remove_member', { p_team_id: TA, p_user_id: D });
+  await refused(call('D', 'team_member_candidates', { p_team_id: TS }), /super_admin_required/);
+  await refused(pg.rpc(null, 'team_member_candidates', { p_team_id: TS }));
+  await call('SA', 'team_delete', { p_team_id: TS });
 });
 
 test('Super Admin edits an account’s name and email, with an audit entry; others cannot', async () => {
@@ -409,7 +429,8 @@ test('Super Admin edits an account’s name and email, with an audit entry; othe
   assert.equal((await call('E', 'my_access')).role, 'admin', 'editing never changes the role');
   // Now addable by that email; a token without claims doesn't wipe the edit on the next sign-in.
   await call('E', 'register_me');
-  assert.equal((await call('A', 'team_add_member', { p_team_id: TA, p_email: 'eve@example.test' })).name, 'Eve');
+  await invite('A', TA, 'eve@example.test', 'E');
+  assert.ok((await call('A', 'team_get', { p_team_id: TA })).members.some(m => m.id === E && m.name === 'Eve'));
   const audit = await call('SA', 'admin_audit', { p_limit: 5 });
   assert.ok(audit.some(a => a.action === 'profile' && a.target.name === 'Eve'));
 });
@@ -441,31 +462,34 @@ test('Super Admin deletes an account: teams cleaned up, dashboard kept for recov
   await assert.rejects(call('SA', 'admin_delete_user', { p_user_id: 'auth0|nobody00000000000' }), (e) => e.code === 'PT404');
 });
 
-test('Create Team: Admins search the directory by email and create a team with members in one step', async () => {
+test('the user directory (all accounts and emails) is for Super Admins only', async () => {
   const F = 'auth0|fred00000000000000000000';
   who.F = claimsFor(F, { email: 'fred@example.test', name: 'Fred' });
   await call('F', 'register_me');
-  const dir = await call('A', 'team_member_directory');
-  assert.ok(dir.some(u => u.email === 'fred@example.test') && dir.some(u => u.email === 'bob@example.test'), 'active accounts, by email');
-  assert.ok(!dir.some(u => u.id === A), 'not the caller');
-  assert.ok(dir.every(u => Object.keys(u).sort().join() === 'email,email_verified,id,name'), 'name and email only: no role, status or dates');
-  // Only the people who can create teams get the list.
+  // A regular Admin can't fetch it directly, nor create a team with picked members.
+  await refused(call('A', 'team_member_directory'), /super_admin_required/);
   await refused(call('NEW', 'team_member_directory')); // a User
   await refused(pg.rpc(null, 'team_member_directory'));
+  await refused(call('A', 'team_create_with_members', { p_name: 'Gamma', p_member_ids: [B, F] }), /super_admin_required/);
+  assert.ok(!(await call('A', 'team_list', { p_scope: 'mine' })).some(t => t.name === 'Gamma'), 'nothing created');
+  const plain = await call('A', 'team_create_with_members', { p_name: 'Gamma', p_member_ids: [] });
+  assert.equal(plain.members_added, 0, 'a name alone still works for Admins');
+  await call('A', 'team_delete', { p_team_id: plain.id });
+  // The Super Admin gets it.
+  const dir = await call('SA', 'team_member_directory');
+  assert.ok(dir.some(u => u.email === 'fred@example.test') && dir.some(u => u.email === 'bob@example.test'), 'active accounts, by email');
+  assert.ok(!dir.some(u => u.id === SA), 'not the caller');
+  assert.ok(dir.every(u => Object.keys(u).sort().join() === 'email,email_verified,id,name'), 'name and email only: no role, status or dates');
   await call('SA', 'admin_set_status', { p_user_id: F, p_status: 'blocked' });
-  assert.ok(!(await call('A', 'team_member_directory')).some(u => u.id === F), 'blocked accounts are hidden');
+  assert.ok(!(await call('SA', 'team_member_directory')).some(u => u.id === F), 'blocked accounts are hidden');
   await refused(call('F', 'team_member_directory'), /workspace_access_denied/);
-  await assert.rejects(call('A', 'team_create_with_members', { p_name: 'Gamma', p_member_ids: [B, F] }), /blocked or no longer exist/);
-  assert.ok(!(await call('A', 'team_list', { p_scope: 'mine' })).some(t => t.name === 'Gamma'), 'nothing created when a member is refused');
+  await assert.rejects(call('SA', 'team_create_with_members', { p_name: 'Gamma', p_member_ids: [B, F] }), /blocked or no longer exist/);
   await call('SA', 'admin_set_status', { p_user_id: F, p_status: 'active' });
-  const r = await call('A', 'team_create_with_members', { p_name: 'Gamma', p_member_ids: [B, F, F, A] });
+  const r = await call('SA', 'team_create_with_members', { p_name: 'Gamma', p_member_ids: [B, F, F, SA] });
   assert.equal(r.members_added, 2, 'duplicates and the owner are ignored');
-  const g = await call('A', 'team_get', { p_team_id: r.id });
-  assert.deepEqual(g.members.map(m => m.id).sort(), [A, B, F].sort());
-  assert.equal((await call('F', 'team_get', { p_team_id: r.id })).me.access, 'member');
-  await assert.rejects(call('A', 'team_create_with_members', { p_name: 'gamma', p_member_ids: [] }), /already have a team called/);
+  assert.deepEqual((await call('SA', 'team_get', { p_team_id: r.id })).members.map(m => m.id).sort(), [SA, B, F].sort());
   await refused(call('NEW', 'team_create_with_members', { p_name: 'Sneaky', p_member_ids: [A] })); // a User can't create teams
-  await call('A', 'team_delete', { p_team_id: r.id });
+  await call('SA', 'team_delete', { p_team_id: r.id });
 });
 
 test('only the owner deletes a team; deleting removes its tasks and projects', async () => {
@@ -474,4 +498,9 @@ test('only the owner deletes a team; deleting removes its tasks and projects', a
   const left = (await pg.admin('select count(*)::int as n from public.team_tasks where team_id = $1', [TA])).rows[0].n;
   assert.equal(left, 0);
   assert.deepEqual(await call('SA', 'team_stats'), { my_teams: 0, total_teams: 1 });
+  // Every team deletion is in the audit log: who, which team, when.
+  const a = (await call('SA', 'admin_audit', { p_limit: 20 })).find(x => x.action === 'team_delete' && x.target.id === TA);
+  assert.equal(a.actor.id, A);
+  assert.equal(a.target.name, 'Alpha');
+  assert.ok(a.at);
 });

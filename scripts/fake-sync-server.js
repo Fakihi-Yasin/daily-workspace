@@ -9,10 +9,13 @@
 //   SUPABASE_URL=http://localhost:54321 SUPABASE_PUBLISHABLE_KEY=sb_publishable_test npm run build:test
 //
 // Test controls (no sign-in): /__down?v=1|0 simulates an outage; /__bootstrap?user=<name> makes
-// test|<name> the first Super Admin (what DEPLOY.md does in the Supabase SQL editor).
+// test|<name> the first Super Admin (what DEPLOY.md does in the Supabase SQL editor);
+// /__verify?user=<name>&v=0|1 makes that test account's email unverified / verified (like Auth0's
+// email_verified, which is false until the person clicks Auth0's confirmation email).
 const http = require('node:http');
 const port = +(process.argv[2] || 54321);
 let down = false;
+const unverified = new Set();
 
 (async () => {
   const { createDb, claimsFor } = await import('../test/support/supabase-pg.mjs');
@@ -28,9 +31,14 @@ let down = false;
       return pg.admin('select app_private.bootstrap_super_admin($1) as r', ['test|' + url.searchParams.get('user')])
         .then(r => send(200, r.rows[0]), e => send(400, { message: e.message }));
     }
+    if (url.pathname === '/__verify') {
+      const u = url.searchParams.get('user');
+      if (url.searchParams.get('v') === '1') unverified.delete(u); else unverified.add(u);
+      return send(200, { user: u, verified: !unverified.has(u) });
+    }
     if (down) { req.socket.destroy(); return; }
     const m = /^Bearer test-token\.([A-Za-z0-9_-]+)$/.exec(req.headers.authorization || '');
-    const claims = m ? claimsFor('test|' + m[1], { email: m[1] + '@test.invalid', name: m[1] }) : null;
+    const claims = m ? claimsFor('test|' + m[1], { email: m[1] + '@test.invalid', name: m[1], verified: !unverified.has(m[1]) }) : null;
     let body = '';
     req.on('data', c => { body += c; });
     req.on('end', async () => {

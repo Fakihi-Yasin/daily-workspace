@@ -1,7 +1,7 @@
 // Users (Super Admin only): everyone who signed up through Auth0, their role and status.
 // The database refuses every call here from anyone but an active Super Admin; the sidebar link and
 // the route guard in app.js only keep the page out of other people's way.
-import { html, useState, Icon, Chip, Modal, Empty, ActionsMenu } from './lib.js';
+import { html, useState, Icon, Chip, Modal, Empty, ActionsMenu, Avatar } from './lib.js';
 import { useRpc, change } from './teamwork.js';
 
 export const ROLES = [['user', 'User'], ['admin', 'Admin'], ['super_admin', 'Super Admin']];
@@ -70,7 +70,8 @@ export function Users() {
         const self = u.user_id === meId;
         const lastSuper = u.role === 'super_admin' && u.status === 'active' && activeSupers <= 1;
         return html`<tr key=${u.user_id} class=${u.status === 'blocked' ? 'is-blocked' : ''}>
-          <td><strong>${u.name || html`<span class="muted">—</span>`}</strong>${self && html` <${Chip}>You<//>`}</td>
+          <td><div class="user-cell"><${Avatar} p=${{ id: u.user_id, name: u.name, email: u.email, photo_v: u.photo_v }} size=${32} />
+            <span><strong>${u.name || html`<span class="muted">—</span>`}</strong>${self && html` <${Chip}>You<//>`}</span></div></td>
           <td>${u.email || html`<span class="muted">not yet known</span>`}${u.email && !u.email_verified ? html` <${Chip} color="yellow" title="Email not confirmed: can't be added to teams by email">unconfirmed<//>` : ''}</td>
           <td title=${u.last_seen_at ? 'Last seen ' + fmtWhen(u.last_seen_at) : 'Never signed in to this app'}>${fmtDate(u.signed_up_at)}</td>
           <td>
@@ -127,7 +128,7 @@ function EditUser({ u, onClose }) {
     : html`<form class="edit-user" onSubmit=${(e) => { e.preventDefault(); if (dirty) setConfirming(true); }}>
       <label class="field">Name<input type="text" maxlength="200" value=${name} onInput=${(e) => setName(e.target.value)} placeholder="Display name" /></label>
       <label class="field">Email<input type="email" maxlength="320" value=${email} onInput=${(e) => setEmail(e.target.value)} placeholder="name@example.com" />
-        <span class="hint">Shown on the Users page and in teams. If their sign-in later sends a name or email, that one is used.</span></label>
+        <span class="hint">The name is their display name everywhere (they can also change it in their profile). If their sign-in later sends an email, that one is used.</span></label>
       <p class="small muted">Account id: <code>${u.user_id}</code>. Role and status are changed in the table.</p>
       <div class="row"><span class="spacer"></span>
         <button type="button" class="btn" onClick=${onClose}>Cancel</button>
@@ -144,8 +145,9 @@ function AuditLog() {
     : a.action === 'bootstrap' ? 'made first Super Admin (SQL editor)'
     : a.action === 'backfill' ? 'kept workspace access as Admin (rollout)'
     : a.action === 'profile' ? `details changed: ${a.old} → ${a.new}`
-    : a.action === 'delete' ? 'account deleted' : a.action;
-  return html`<section class="section"><div class="section-head"><h3>Recent changes</h3><span class="muted small">who changed a role or blocked an account, and when</span></div>
+    : a.action === 'delete' ? 'account deleted'
+    : a.action === 'team_delete' ? `team deleted (${a.new})` : a.action;
+  return html`<section class="section"><div class="section-head"><h3>Recent changes</h3><span class="muted small">who changed a role, blocked or deleted an account, or deleted a team, and when</span></div>
     <ul class="activity">${data.map((a, i) => html`<li key=${i}><span class="muted small">${fmtWhen(a.at)}</span>
-      <span><strong>${a.actor.id === 'migration' ? 'Rollout' : a.actor.id === 'sql-editor' ? 'SQL editor' : a.actor.name}</strong>: ${a.target.name} — ${describe(a)}</span></li>`)}</ul></section>`;
+      <span><strong>${a.actor.id === 'migration' ? 'Rollout' : a.actor.id === 'sql-editor' ? 'SQL editor' : a.actor.name}</strong>: ${a.target.team ? `“${a.target.name}”` : a.target.name} — ${describe(a)}</span></li>`)}</ul></section>`;
 }

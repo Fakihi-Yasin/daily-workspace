@@ -7,8 +7,8 @@ export async function createAuth() {
   return {
     provider: 'test',
     error: null,
-    user: id ? { id: 'test|' + id, email: id + '@test.invalid', name: id } : null,
-    login: (who) => { if (!who) return; window.localStorage.setItem(KEY, who); window.location.replace('/' + window.location.hash); },
+    user: id ? { id: 'test|' + id, email: id + '@test.invalid', name: id, picture: '' } : null,
+    login: (who) => { if (!who || typeof who !== 'string') return; window.localStorage.setItem(KEY, who); window.location.reload(); },
     // Fake token for the test build's fake sync server (never a real credential).
     getToken: async () => 'test-token.' + id,
     logout: () => { window.localStorage.removeItem(KEY); window.location.replace('/'); },

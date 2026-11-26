@@ -1,4 +1,4 @@
-import { html, render, useState, useEffect, useResource, Icon, Toasts, ThemeToggle, api } from './lib.js';
+import { html, render, useState, useEffect, useResource, Icon, Toasts, ThemeToggle, api, Avatar } from './lib.js';
 import { Today } from './today.js';
 import { Settings } from './settings.js';
 import { Projects } from './projects.js';
@@ -7,7 +7,8 @@ import { Formation } from './formation.js';
 import { Challenges } from './challenges.js';
 import { Stats } from './stats.js';
 import { MiniTimer } from './focus.js';
-import { TeamWork } from './teamwork.js';
+import { TeamWork, InvitePage, UnreadNavBadge } from './teamwork.js';
+import { Profile } from './profile.js';
 import { Users } from './users.js';
 
 // Team Work and Users exist only in the synced web build: the database enforces who may use them
@@ -25,6 +26,8 @@ const ROUTES = [
   ['stats', 'Stats', 'stats', Stats],
   ['users', 'Users', 'users', Users, { when: isSuperAdmin }],
   ['settings', 'Settings', 'settings', Settings],
+  ['invite', 'Team invite', 'team', InvitePage, { when: hasTeams, hidden: true }],
+  ['profile', 'Profile', 'users', Profile, { when: hasTeams, hidden: true }],
 ];
 const allowed = (r) => !(r[4] && r[4].when) || r[4].when();
 
@@ -54,7 +57,7 @@ function App() {
     <nav class="side" aria-label="Main navigation">
       <div class="brand"><i>✓</i><span>Dashboard</span></div>
       ${ROUTES.filter(r => !(r[4] && r[4].hidden) && allowed(r)).map(([key, label, icon]) => html`<a class=${'nav-link' + (key === r[0] ? ' on' : '')} href=${'#/' + key} aria-current=${key === r[0] ? 'page' : undefined} title=${label}>
-        <${Icon} name=${icon} /><span>${label}</span></a>`)}
+        <${Icon} name=${icon} /><span>${label}</span>${key === 'teams' && html`<${UnreadNavBadge} />`}</a>`)}
       <div class="side-foot">
         <${MiniTimer} />
         <${ThemeToggle} />
@@ -70,8 +73,13 @@ function App() {
 
 function Account() {
   const u = window.__dash.user;
+  const [, tick] = useState(0);
+  useEffect(() => { const f = () => tick(x => x + 1); addEventListener('dash-profile', f); return () => removeEventListener('dash-profile', f); }, []);
+  const p = window.__dash.profile;
   return html`<div class="account">
-    <span class="account-id" title=${u.email}>${u.email || u.name}</span>
+    ${p ? html`<a class="account-link" href="#/profile" title="Your profile (name and photo)"><${Avatar} p=${p} size=${30} />
+        <span class="account-text"><span class="account-id">${p.name}</span><span class="account-id" style="font-size:11px">${u.email || ''}</span></span></a>`
+      : html`<span class="account-id" title=${u.email}>${u.email || u.name}</span>`}
     ${window.__dash.role && html`<span class="account-role">${window.__dash.role === 'super_admin' ? 'Super Admin' : window.__dash.role === 'admin' ? 'Admin' : 'User'}</span>`}
     <button class="account-out" onClick=${() => window.__dash.logout()} title="Sign out" aria-label="Sign out"><${Icon} name="logout" size=${16} /><span>Sign out</span></button>
   </div>`;

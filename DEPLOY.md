@@ -254,8 +254,9 @@ the redirect straight after signup, even if they never reach the workspace.
 ### Rules in short
 Members can be Users or Admins; the same rules apply. Only Admins and Super Admins can create a team.
 A team name is unique per owner (case ignored); different owners may use the same name. To add a
-member, the owner picks from the list of active accounts not yet in the team (name and email), or adds
-by verified email.
+member, the owner **invites their full email** (People → Add member); see *Invites, profiles, unread
+badges* below. Only a Super Admin can list accounts and emails (Users page, and the "Add an existing
+account" picker on teams they own); for everyone else the database refuses it (HTTP 403).
 
 **Users page actions (Super Admin):** change role, Block / Unblock, **Edit** name and email (an email
 set here counts as confirmed), and **Delete**. Delete removes the account from the app and its teams
@@ -284,6 +285,61 @@ TEST ONLY). Build with `SUPABASE_URL=http://localhost:54321 SUPABASE_PUBLISHABLE
 then serve it with `node scripts/preview.js dist-test 4323`. Open
 `http://localhost:54321/__bootstrap?user=<name>` to make the test account `test|<name>` the first
 Super Admin. `npm test` includes `test/roles-teams.test.js`, which runs the same SQL.
+
+## Invites, profiles, unread badges, Super Admin team delete (migration 20261126120000)
+
+### What it does
+- **Private directory:** `team_member_directory`, `team_member_candidates`, `team_add_member` (by email)
+  and `team_add_member_id` require an active **Super Admin**; `team_create_with_members` takes members
+  from a Super Admin only. A regular Admin's People → Add member is a single email field: no list,
+  no search, no account count.
+- **Invites by email:** the owner types the full email → `POST /api/invite` (Vercel Function,
+  `api/invite.mjs`). The function has no database power: it calls the database with the owner's own
+  token. `team_invite_create` (owner only) never looks at accounts, so the answer is identical for a
+  registered and an unregistered email. It stores only a SHA-256 hash of a random 64-character token.
+  The email is sent; **only after the provider accepts it** is the invite marked `sent` and the owner
+  sees "Invite sent". If sending fails, it is marked `failed` and can never be used. An invite works
+  **once**, for **7 days**, and only for a signed-in active account whose **verified** email equals the
+  invited one; it adds that account to that team only and never changes its role. A new invite to the
+  same email replaces the old one; the owner can cancel pending invites. At most 50 invites per owner
+  per 24 hours.
+- **Invite link:** `https://<app>/#/invite/<token>`. The token stays in the URL hash (never sent to
+  the server) and survives sign-in, sign-up ("Create an account" on the sign-in screen) and switching
+  accounts. Someone who just signed up and hasn't confirmed their email sees "Confirm your email", then
+  "check again" (a fresh token re-reads `email_verified`).
+- **Profiles** (sidebar → your name, `#/profile`): display name, upload or remove a photo (resized to
+  256 px JPEG in the browser), or **Use my Google photo** for Google sign-ins. Without a photo, two
+  initials from the display name (OSM BEN → OB, Bianco Verde → BV). Photos are only returned to the
+  user, people who share a team with them, and Super Admins. Same avatar in team member cards and on
+  the Users page. A Super Admin's name edit sets the display name.
+- **Unread team tasks:** `team_task_seen` stores, per user and team, when the board was last opened.
+  The red **+N** on Team Work (sidebar, loaded with the dashboard) and on each team card counts tasks
+  **created by someone else** after that, in teams the user is a member of. Opening a team's board
+  clears only that team, once its tasks have loaded; opening the Team Work list clears nothing. Own
+  tasks, edits and status changes never count. Existing memberships started at "seen" on rollout.
+- **Team delete:** the owner (unchanged) or **any Super Admin**, also from Team Work → All teams → ⋯ →
+  Delete team. The dialog names the team and what is deleted (tasks, future projects, scores,
+  activity, pending invites) and needs the team name typed. Accounts, personal dashboards and other
+  teams are untouched. Every team deletion is in the audit log (who, team name, when, counts).
+
+### Email provider (required for invites)
+Without it the app refuses to invite ("Invites can't be emailed yet… No invite was sent") and creates
+nothing. Set these in Vercel → Settings → Environment Variables (Production), then redeploy:
+
+| Name | Value |
+|---|---|
+| `RESEND_API_KEY` | from [Resend](https://resend.com) (Vercel Marketplace: `resend/resend-email`), secret |
+| `INVITE_FROM_EMAIL` | e.g. `Dashboard <invites@your-domain.com>`: an address on a domain verified in Resend |
+| `APP_URL` | optional; the link's origin. Defaults to `https://<VERCEL_PROJECT_PRODUCTION_URL>` |
+| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | already set (also used by the function) |
+
+Auth0: the existing post-login Action already puts `email_verified` in the token; nothing to change.
+For "Create an account" to work, sign-ups must be enabled on the Auth0 database connection.
+
+### Local test
+`INVITE_TEST_OUTBOX=/tmp/outbox.jsonl APP_URL=http://localhost:4323 SUPABASE_URL=http://localhost:54321 SUPABASE_PUBLISHABLE_KEY=sb_publishable_test node scripts/preview.js dist-test 4323`
+writes emails to that file instead of sending them (refused on Vercel). The fake server's
+`/__verify?user=<name>&v=0|1` toggles a test account's `email_verified`.
 
 ## PC Work Time & Activity Details (desktop agent)
 

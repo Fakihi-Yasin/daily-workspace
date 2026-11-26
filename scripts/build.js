@@ -108,7 +108,8 @@ const csp = [
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
-  "img-src 'self' data:",
+  // data: avatars uploaded by users; blob: resizing a photo before upload; Google profile photos.
+  "img-src 'self' data: blob: https://*.googleusercontent.com",
   `connect-src 'self' ${authOrigin} ${syncOrigin}`.replace(/\s+/g, ' ').trim(),
   `frame-src ${authOrigin || "'none'"}`,
   "object-src 'none'",
