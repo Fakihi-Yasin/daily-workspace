@@ -3,6 +3,7 @@ import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, 
 import { PcTimeCard } from './pctime.js';
 import { FocusPanel, requestStart } from './focus.js';
 import { CompletedModal } from './history.js';
+import { useWorkspace, homeSections, HOME_LABELS, CustomizeModal, CalendarSection, ProjectsSection, CategoryInput, CatChip, REPEAT_LABELS } from './workspace.js';
 
 const CAT_COLORS = ['blue', 'pink', 'mint', 'yellow', 'sky'];
 const catColor = (name, all) => CAT_COLORS[Math.max(0, all.indexOf(name)) % CAT_COLORS.length];
@@ -19,6 +20,9 @@ export function Today() {
   const [askDone, setAskDone] = useState(null); // task waiting for "Complete all subtasks" / "parent only"
   const [showDone, setShowDone] = useState(false); // "View completed tasks" popup
   const { data, error } = useResource('/api/today' + (date ? `?date=${date}` : ''));
+  const { data: boot } = useResource('/api/bootstrap');
+  const w = useWorkspace();
+  const [customizing, setCustomizing] = useState(false);
   const [over, setOver] = useState({}); // optimistic marks: key -> bool
   const [todoOver, setTodoOver] = useState({}); // optimistic one-off task changes: id -> { done } | { gone: true }
   const [pending, setPending] = useState([]); // one-off tasks being saved
@@ -56,7 +60,7 @@ export function Today() {
   const todos = [...data.todos.filter(t => !(todoOver[t.id] && todoOver[t.id].gone)).map(t => (todoOver[t.id] ? { ...t, ...todoOver[t.id] } : t)), ...pending];
   const overdueIds = overdueShown && overdueShown.date === data.date ? overdueShown.ids : new Set();
   const cancelled = (data.cancelled || []).filter(t => !(todoOver[t.id] && todoOver[t.id].gone));
-  const ctx = { data, assets, over, setOver, isToday, todos, setTodoOver, setPending, overdueIds, cancelled, askDone: setAskDone };
+  const ctx = { data, assets, over, setOver, isToday, todos, setTodoOver, setPending, overdueIds, cancelled, askDone: setAskDone, cats: (boot && boot.categories) || [], sites: !w || w.layout.sites };
   const count = liveCount(ctx);
   const doneIds = settled.date === data.date ? settled.ids : new Set();
   const openTasks = data.tasks.filter(t => !doneIds.has(t.id));
@@ -73,29 +77,31 @@ export function Today() {
         <button class="icon-btn" aria-label="Next day" onClick=${() => setDate(addDays(data.date, 1))}><${Icon} name="chevR" /></button>
         ${!isToday && html`<button class="btn sm" onClick=${() => setDate(null)}>Back to today</button>`}
       </div>
+      <span class="spacer"></span>
+      ${w && html`<button class="btn sm customize-btn" onClick=${() => setCustomizing(true)} title="Show, hide and reorder sections and sidebar items"><${Icon} name="edit" size=${14} />Customize</button>`}
     </header>
     ${!isToday && html`<p class="notice" style="margin-bottom:14px">${data.date < data.today
       ? 'You are viewing a past day: your checks correct that day without touching today.'
       : 'Upcoming day: only moved tasks and already scheduled routines appear.'}</p>`}
 
-    <div class="today-grid">
-      <div class="tg-focus"><${FocusPanel} today=${data.today} tz=${data.tz} /></div>
-
-      <aside class="tg-side" aria-label="Day summary">
-        <${ScoreCard} count=${count} data=${data} onHistory=${() => setShowDone(true)} />
-        <${NextAction} ctx=${ctx} />
-        <${SessionsCard} sessions=${data.sessions} isToday=${isToday} />
-        ${isToday && html`<${PcTimeCard} today=${data.today} />`}
-      </aside>
-
-      <div class="tg-tasks">
-        <${MyTasks} ctx=${ctx} />
-        ${data.tasks.length === 0 && todos.length > 0 ? html`<p class="small muted">No recurring routines scheduled ${isToday ? 'today' : 'this day'} · <a href="#/settings?tab=routines">Set up routines</a></p>`
+    ${(() => {
+      // Sections in this account's own order (Customize). Accounts from before customization see
+      // exactly the layout they had.
+      const keys = homeSections(w && w.layout) || ['focus', 'tasks', 'routines', 'score', 'next', 'sessions', 'pctime'];
+      const SIDE = ['score', 'next', 'sessions', 'pctime'];
+      const main = keys.filter(k => !SIDE.includes(k));
+      const side = keys.filter(k => SIDE.includes(k) && (k !== 'pctime' || isToday));
+      const focusTop = main[0] === 'focus';
+      const part = (k) => k === 'focus' ? html`<${FocusPanel} key="focus" today=${data.today} tz=${data.tz} />`
+        : k === 'tasks' ? html`<${MyTasks} key="tasks" ctx=${ctx} />`
+        : k === 'calendar' ? html`<${CalendarSection} key="calendar" />`
+        : k === 'projects' ? html`<${ProjectsSection} key="projects" />`
+        : k === 'routines' ? html`<div key="routines" class="routines-block">        ${data.tasks.length === 0 && todos.length > 0 ? html`<p class="small muted">No recurring routines scheduled ${isToday ? 'today' : 'this day'} · <a href="#/settings?tab=routines">Set up routines</a></p>`
         : data.tasks.length === 0
           ? html`<div class="card empty-routines">
               <h3>No routines scheduled ${isToday ? 'today' : 'this day'}</h3>
-              <p class="muted">Add your sites and accounts, then choose which days each routine runs.</p>
-              <div class="row wrap"><a class="btn primary sm" href="#/settings?tab=routines">Set up routines</a><a class="btn sm" href="#/settings?tab=assets">Add accounts & sites</a></div>
+              <p class="muted">${ctx.sites ? 'Add your sites and accounts, then choose which days each routine runs.' : 'Routines are checklists that come back on the days you choose. For one-off deadlines that repeat, use a repeating task (Quick add).'}</p>
+              <div class="row wrap"><a class="btn primary sm" href="#/settings?tab=routines">Set up routines</a>${ctx.sites && html`<a class="btn sm" href="#/settings?tab=assets">Add accounts & sites</a>`}</div>
             </div>`
           : html`
             ${openTasks.length === 0 && html`<div class="card all-done" role="status"><${Icon} name="check" size=${18} /><div><strong>Daily routines complete</strong>
@@ -107,11 +113,21 @@ export function Today() {
                 <${Icon} name=${doneOpen ? 'down' : 'chevR'} size=${16} /><span>Completed</span><span class="muted">${doneTasks.length}</span></button>
               ${doneOpen && cats.filter(c => doneTasks.some(t => t.category === c)).map(cat => html`<${CategorySection} key=${'d-' + cat} cat=${cat} color=${catColor(cat, cats)} compact
                 tasks=${doneTasks.filter(t => t.category === cat)} all=${data.tasks.filter(t => t.category === cat)} showTotal=${false} ctx=${ctx} />`)}
-            </section>`}`}
-      </div>
-    </div>
+            </section>`}`}</div>`
+        : k === 'score' ? html`<${ScoreCard} key="score" count=${count} data=${data} onHistory=${() => setShowDone(true)} />`
+        : k === 'next' ? html`<${NextAction} key="next" ctx=${ctx} />`
+        : k === 'sessions' ? html`<${SessionsCard} key="sessions" sessions=${data.sessions} isToday=${isToday} />`
+        : k === 'pctime' ? html`<${PcTimeCard} key="pctime" today=${data.today} />` : null;
+      return html`<div class=${'today-grid' + (focusTop ? '' : ' no-focus') + (side.length ? '' : ' no-side')}>
+        ${focusTop && html`<div class="tg-focus">${part('focus')}</div>`}
+        ${side.length > 0 && html`<aside class="tg-side" aria-label="Day summary">${side.map(part)}</aside>`}
+        <div class="tg-tasks">${(focusTop ? main.slice(1) : main).map(part)}
+          ${main.length === 0 && html`<${Empty} title="Nothing on this page">Use <strong>Customize</strong> to choose what Today shows.<//>`}</div>
+      </div>`;
+    })()}
     ${askDone && html`<${DoneChoice} t=${askDone} ctx=${ctx} onClose=${() => setAskDone(null)} />`}
     ${showDone && html`<${CompletedModal} date=${data.date} onClose=${() => setShowDone(false)} />`}
+    ${customizing && html`<${CustomizeModal} onClose=${() => setCustomizing(false)} />`}
   </div>`;
 }
 
@@ -183,6 +199,7 @@ async function deleteTodo(ctx, t) {
 
 function MyTasks({ ctx }) {
   const [title, setTitle] = useState('');
+  const [cat, setCat] = useState('');
   const [showCancelled, setShowCancelled] = useState(false);
   const overdue = ctx.todos.filter(t => ctx.overdueIds.has(t.id));
   const rest = ctx.todos.filter(t => !ctx.overdueIds.has(t.id));
@@ -194,8 +211,8 @@ function MyTasks({ ctx }) {
     if (!v) return;
     const temp = { id: 'tmp-' + Date.now(), date: ctx.data.date, title: v, done: 0, done_for_day: 0, temp: true };
     ctx.setPending(p => [...p, temp]);
-    setTitle(''); // ready for the next one
-    try { await api('POST', '/api/todos', { date: ctx.data.date, title: v }); bus.emit(); }
+    setTitle(''); // ready for the next one (the category stays picked)
+    try { await api('POST', '/api/todos', { date: ctx.data.date, title: v, category_name: cat.trim() }); bus.emit(); }
     catch (err) { ctx.setPending(p => p.filter(x => x.id !== temp.id)); toast({ msg: err.message, kind: 'error' }); }
   };
   return html`<section class="section routine my-tasks" id="my-tasks" aria-label="My tasks">
@@ -208,6 +225,7 @@ function MyTasks({ ctx }) {
       <div class="add-task-row">
         <${AutoGrow} id="add-task-input" value=${title} onInput=${setTitle} onSave=${() => add()} autofocus=${false} enterkeyhint="done"
           label=${'Add a task' + (ctx.isToday ? '' : ` for ${fmtShort(ctx.data.date)}`)} placeholder=${ctx.isToday ? 'Task title, e.g. Send the weekly report' : 'Task title'} />
+        <${CategoryInput} compact value=${cat} onInput=${setCat} cats=${ctx.cats} label="Category for the new task" placeholder="Category (optional)" />
         <button class="btn primary" disabled=${!title.trim()}><${Icon} name="plus" size=${15} />Add task</button>
       </div>
     </form>
@@ -273,6 +291,7 @@ function TodoRow({ t, ctx }) {
   const [menu, setMenu] = useState(false);
   const [subsOpen, setSubsOpen] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [details, setDetails] = useState(false);
   const ref = useRef();
   useOutside(menu, setMenu, ref);
   const cancelled = !!t.cancelled;
@@ -293,7 +312,8 @@ function TodoRow({ t, ctx }) {
       ${editing
         ? html`<${TitleEditor} value=${t.title} label="Task title" onSave=${saveTitle} onCancel=${() => setEditing(false)} />`
         : html`<span class="todo-title">${late && html`<span class="od-dot" aria-hidden="true"></span>`}<${TaskText} text=${t.title} /></span>
-          <small class=${late ? 'od-label' : ''}>${late && html`<${Icon} name="alert" size=${13} /> `}${status}</small>
+          <small class=${late ? 'od-label' : ''}>${late && html`<${Icon} name="alert" size=${13} /> `}${status}
+            ${t.category_id && html` <${CatChip} cats=${ctx.cats} id=${t.category_id} />`}${t.repeat && html` <span class="repeat-mark" title=${'Repeats: ' + (REPEAT_LABELS.find(x => x[0] === t.repeat) || ['', t.repeat])[1]}>↻ ${(REPEAT_LABELS.find(x => x[0] === t.repeat) || ['', t.repeat])[1].toLowerCase()}</span>`}</small>
           ${subs.length > 0 && html`<button class="sub-progress" aria-expanded=${showSubs} onClick=${() => setSubsOpen(!subsOpen)}>
             <${Icon} name=${showSubs ? 'chevD' : 'chevR'} size=${14} />${t.sub_done}/${subs.length} subtasks done</button>`}`}
     </div>
@@ -310,6 +330,7 @@ function TodoRow({ t, ctx }) {
         <button class="icon-btn" disabled=${t.temp} aria-label=${'Options — ' + firstLine(t.title)} aria-expanded=${menu} onClick=${() => setMenu(!menu)}><${Icon} name="more" /></button>
         ${menu && html`<div class="menu-pop">
           <button class="item" onClick=${() => { setMenu(false); setEditing(true); }}><${Icon} name="note" size=${16} />Edit title</button>
+          <button class="item" onClick=${() => { setMenu(false); setDetails(true); }}><${Icon} name="edit" size=${16} />Category & repeat…</button>
           ${!cancelled && html`<button class="item" onClick=${() => { setMenu(false); setSubsOpen(true); setAdding(true); }}><${Icon} name="list" size=${16} />Add subtask</button>`}
           ${cancelled
             ? html`<button class="item" onClick=${() => { setMenu(false); cancelTodo(ctx, t, false); }}><${Icon} name="undo" size=${16} />Reopen task</button>`
@@ -319,7 +340,29 @@ function TodoRow({ t, ctx }) {
       </div>
     </div>`}
     ${showSubs && !t.temp && html`<${Subtasks} t=${t} ctx=${ctx} adding=${adding} setAdding=${setAdding} readOnly=${cancelled} />`}
+    ${details && html`<${TodoDetails} t=${t} ctx=${ctx} onClose=${() => setDetails(false)} />`}
   </div>`;
+}
+
+// A task's category (pick or type a new one) and repeat rule.
+function TodoDetails({ t, ctx, onClose }) {
+  const cur = (ctx.cats.find(c => c.id === t.category_id) || {}).name || '';
+  const [cat, setCat] = useState(cur);
+  const [repeat, setRepeat] = useState(t.repeat || '');
+  const save = async (e) => {
+    e.preventDefault();
+    try { await api('PUT', `/api/todos/${t.id}`, { category_name: cat.trim(), repeat }); bus.emit(); onClose(); }
+    catch (err) { toast({ msg: err.message, kind: 'error' }); }
+  };
+  return html`<${Modal} title="Category & repeat" onClose=${onClose}>
+    <form class="stack" onSubmit=${save}>
+      <p class="small"><strong>${firstLine(t.title)}</strong></p>
+      <${CategoryInput} value=${cat} onInput=${setCat} cats=${ctx.cats} />
+      <label class="field">Repeat<select value=${repeat} onChange=${(e) => setRepeat(e.target.value)}>${REPEAT_LABELS.map(([v, l]) => html`<option value=${v}>${l}</option>`)}</select>
+        <span class="hint">A repeating task schedules its next one when you mark it done.</span></label>
+      <div class="row"><span class="spacer"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button class="btn primary">Save</button></div>
+    </form>
+  <//>`;
 }
 
 function Subtasks({ t, ctx, adding, setAdding, readOnly }) {

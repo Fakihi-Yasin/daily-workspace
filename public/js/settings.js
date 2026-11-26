@@ -1,21 +1,27 @@
 // Settings: accounts & sites, routines (versioned with effective dates), categories, timezone, backup, demo.
 import { html, useState, useEffect, useRef, useResource, api, act, bus, toast, Icon, useTheme, THEMES, downloadJson, isBrowserStorage, isCloudStorage, BROWSER_NOTE, CLOUD_NOTE, Chip, Modal, EffectPicker, Empty, fmtDay, fmtShort, addDays,
   KIND_LABELS, KIND_PLURAL, KIND_COLOR, DAYS, DAY_NAMES, kindsFor, ActionsMenu } from './lib.js';
-import { PcTimeSettings } from './pctime.js';
+import { PcTimeSettings, hasPcTime } from './pctime.js';
+import { useWorkspace } from './workspace.js';
 
 const TABS = [['assets', 'Accounts & sites'], ['routines', 'Routines'], ['categories', 'Categories'], ['general', 'General'], ['pctime', 'PC Work Time'], ['backup', 'Backup'], ['demo', 'Demo']];
 
 export function Settings() {
+  // Accounts & sites only where this account uses them (Customize → Sites & social accounts);
+  // PC Work Time only where it's granted. Localhost (no account) keeps every tab.
+  const w = useWorkspace();
+  const tabs = TABS.filter(([k]) => (k !== 'assets' || !w || w.layout.sites) && (k !== 'pctime' || !window.__dash || hasPcTime()));
   const [tab, setTab] = useState(() => {
     const q = new URLSearchParams(location.hash.split('?')[1] || '').get('tab');
     if (q && TABS.some(t => t[0] === q)) return q;
     try { return sessionStorage.getItem('settingsTab') || 'assets'; } catch { return 'assets'; }
   });
+  if (!tabs.some(t => t[0] === tab) && tabs.length && w) setTimeout(() => setTab(tabs.find(t => t[0] === 'categories') ? 'categories' : tabs[0][0]), 0);
   const { data } = useResource('/api/bootstrap');
   const pick = (k) => { setTab(k); sessionStorage.setItem('settingsTab', k); };
   return html`<div>
     <header class="page-head"><h1>Settings</h1></header>
-    <div class="tabs" role="tablist">${TABS.map(([k, l]) => html`<button role="tab" aria-selected=${tab === k} class=${tab === k ? 'on' : ''} onClick=${() => pick(k)}>${l}</button>`)}</div>
+    <div class="tabs" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" aria-selected=${tab === k} class=${tab === k ? 'on' : ''} onClick=${() => pick(k)}>${l}</button>`)}</div>
     ${!data ? html`<p class="muted">Loading…</p>`
       : tab === 'assets' ? html`<${Assets} data=${data} />`
       : tab === 'routines' ? html`<${Routines} data=${data} />`
@@ -339,8 +345,12 @@ function Categories({ data }) {
   const [name, setName] = useState('');
   const [color, setColor] = useState('sky');
   return html`<div class="stack">
-    <p class="muted">Project categories. Those marked “Focus” appear in the “What are you working on?” prompt.</p>
-    <div class="list">${data.categories.map(c => html`<${CatRow} key=${c.id} c=${c} />`)}</div>
+    <p class="muted">Your own categories for tasks and projects (teams have their own). Those marked “Focus” appear in the “What are you working on?” prompt.
+      You can also type a new category directly when adding a task or project. Archiving hides a category from pickers; its tasks and projects keep it.</p>
+    <div class="list">${data.categories.filter(c => !c.archived).map(c => html`<${CatRow} key=${c.id} c=${c} />`)}</div>
+    ${data.categories.some(c => c.archived) && html`<details class="card flat"><summary><strong>Archived</strong> <span class="muted small">${data.categories.filter(c => c.archived).length}</span></summary>
+      <div class="list" style="margin-top:8px">${data.categories.filter(c => c.archived).map(c => html`<div class="list-row" key=${c.id}><${Chip} color=${c.color}>●</${Chip}><span>${c.name}</span><span class="spacer"></span>
+        <button class="btn sm" onClick=${() => act('PUT', `/api/categories/${c.id}/archive`, { archived: false })}>Unarchive</button></div>`)}</div></details>`}
     <form class="card row wrap" style="align-items:flex-end" onSubmit=${async (e) => { e.preventDefault(); await act('POST', '/api/categories', { name, color, coding: true }); setName(''); toast({ msg: 'Category added' }); }}>
       <label class="field" style="flex:1;min-width:200px">New category<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} placeholder="e.g. Mobile apps" /></label>
       <label class="field">Color<select value=${color} onChange=${(e) => setColor(e.target.value)}>${COLORS.map(c => html`<option value=${c}>${c}</option>`)}</select></label>
@@ -356,6 +366,7 @@ function CatRow({ c }) {
     <input type="text" value=${name} onInput=${(e) => setName(e.target.value)} onBlur=${() => name !== c.name && save({ name })} aria-label="Category name" style="max-width:280px" />
     <select value=${c.color} onChange=${(e) => save({ color: e.target.value })} aria-label="Color" style="width:auto">${COLORS.map(x => html`<option value=${x}>${x}</option>`)}</select>
     <label class="checkline"><input type="checkbox" checked=${!!c.coding} onChange=${(e) => save({ coding: e.target.checked })} />Focus</label>
+    ${c.key !== 'other' && html`<span class="spacer"></span><button class="btn sm" onClick=${() => act('PUT', `/api/categories/${c.id}/archive`, { archived: true })} title="Hide from pickers; tasks and projects keep it">Archive</button>`}
   </div>`;
 }
 

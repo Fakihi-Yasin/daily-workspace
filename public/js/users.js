@@ -78,7 +78,7 @@ export function Users() {
             <select class="sm-select" aria-label=${'Role of ' + label(u)} value=${u.role} disabled=${self || lastSuper}
               title=${self ? 'You can’t change your own role' : lastSuper ? 'The last active Super Admin can’t be demoted' : u.role_changed_by ? `Changed by ${u.role_changed_by.name}, ${fmtWhen(u.role_changed_at)}` : ''}
               onChange=${(e) => { const v = e.target.value; e.target.value = u.role; setRoleFor(u, v); }}>
-              ${ROLES.map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select>
+              ${ROLES.map(([k, l]) => html`<option value=${k} disabled=${k === 'super_admin' && u.role !== 'super_admin'}>${l}${k === 'super_admin' && u.role !== 'super_admin' ? ' (only one)' : ''}</option>`)}</select>
           </td>
           <td><${Chip} color=${u.status === 'blocked' ? 'pink' : 'mint'} title=${u.status_changed_by ? `Changed by ${u.status_changed_by.name}, ${fmtWhen(u.status_changed_at)}` : undefined}>${u.status === 'blocked' ? 'Blocked' : 'Active'}<//></td>
           <td class="r"><${ActionsMenu} label=${label(u)} items=${[

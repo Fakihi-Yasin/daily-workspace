@@ -66,7 +66,7 @@ test('every new signup is registered as Admin and opens its own dashboard at onc
   // Signing in again never changes the role, and the role can't be passed in.
   await assert.rejects(call('NEW', 'register_me', { role: 'super_admin' }));
   assert.equal((await call('NEW', 'register_me')).role, 'admin');
-  assert.deepEqual(await call('NEW', 'my_access'), { registered: true, role: 'admin', status: 'active' });
+  assert.deepEqual(await call('NEW', 'my_access'), { registered: true, role: 'admin', status: 'active', features: [] });
   assert.equal((await pg.admin('select role from public.app_users where user_id = $1', [NEW])).rows[0].role, 'admin', 'stored as Admin, not only reported');
   // Their own private dashboard works immediately: empty at first, then saved and read back.
   assert.equal(await call('NEW', 'get_snapshot', { p_slot: 'real', p_with_data: true }), null);
@@ -145,13 +145,10 @@ test('the last active Super Admin is protected from demotion and blocking', asyn
   await assert.rejects(call('SA', 'admin_set_status', { p_user_id: SA, p_status: 'blocked' }), /own account/);
   // The guard itself (it also covers two Super Admins demoting each other at the same moment).
   await assert.rejects(pg.admin('select app_private.assert_not_last_super_admin($1)', [SA]), /last active Super Admin/);
-  // With a second Super Admin, one can demote the other; a blocked Super Admin doesn't count as active.
-  await call('SA', 'admin_set_role', { p_user_id: LEGACY, p_role: 'super_admin' });
-  await call('SA', 'admin_set_status', { p_user_id: LEGACY, p_status: 'blocked' });
-  await assert.rejects(pg.admin('select app_private.assert_not_last_super_admin($1)', [SA]), /last active Super Admin/);
-  await refused(call('LEGACY', 'admin_set_role', { p_user_id: SA, p_role: 'user' }), /workspace_access_denied/);
-  await call('SA', 'admin_set_status', { p_user_id: LEGACY, p_status: 'active' });
-  await call('SA', 'admin_set_role', { p_user_id: LEGACY, p_role: 'admin' });
+  // A single Super Admin: the app can't make another one, whoever asks.
+  await assert.rejects(call('SA', 'admin_set_role', { p_user_id: LEGACY, p_role: 'super_admin' }), /single Super Admin/);
+  await refused(call('A', 'admin_set_role', { p_user_id: A, p_role: 'super_admin' }), /super_admin_required/);
+  assert.equal((await pg.admin("select count(*)::int n from public.app_users where role = 'super_admin'")).rows[0].n, 1);
 });
 
 let TA, TB;
@@ -294,7 +291,7 @@ test('blocking B stops an already signed-in session on its next request; unblock
   const r0 = await call('B', 'save_snapshot', { p_slot: 'real', p_expected_rev: null, p_new_rev: 'b-rev-0001', p_snapshot: snap('b-rev-0001') });
   assert.equal(r0.status, 'ok');
   await call('SA', 'admin_set_status', { p_user_id: B, p_status: 'blocked' });
-  assert.deepEqual(await call('B', 'my_access'), { registered: true, role: 'admin', status: 'blocked' });
+  assert.deepEqual(await call('B', 'my_access'), { registered: true, role: 'admin', status: 'blocked', features: [] });
   await refused(call('B', 'get_snapshot', { p_slot: 'real', p_with_data: true }), /workspace_access_denied/);
   await refused(call('B', 'save_snapshot', { p_slot: 'real', p_expected_rev: 'b-rev-0001', p_new_rev: 'b-rev-0002', p_snapshot: snap('b-rev-0002') }), /workspace_access_denied/);
   await refused(call('B', 'team_list', { p_scope: 'mine' }), /workspace_access_denied/);

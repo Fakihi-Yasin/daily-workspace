@@ -107,6 +107,7 @@ async function start() {
     user: auth.user,
     // Role from the database ('user' | 'admin' | 'super_admin'), or null without Supabase (no roles, no Team Work).
     role: access ? access.role : null,
+    features: (access && access.features) || [],
     // Database functions for Team Work and User Management; a refusal re-checks this account's access.
     rpc: rpc ? async (name, args) => {
       try { return await rpc(name, args); }
@@ -181,7 +182,9 @@ const accessKey = (auth) => `dash.v2.u.${encodeURIComponent(auth.user.id)}.acces
 async function checkAccess(rpc, auth) {
   try {
     const me = await rpc('register_me');
-    window.localStorage.setItem(accessKey(auth), JSON.stringify({ role: me.role, status: me.status }));
+    // Features granted to this account (e.g. PC Work Time); the database enforces them on every call.
+    try { me.features = (await rpc('my_access')).features || []; } catch { me.features = []; }
+    window.localStorage.setItem(accessKey(auth), JSON.stringify({ role: me.role, status: me.status, features: me.features }));
     return me;
   } catch (e) {
     if (e.offline) {

@@ -49,7 +49,7 @@ export function Projects() {
     ${view === 'later' && html`<p class="notice blue" style="margin-bottom:14px">Ideas and undated plans: they stay visible here, without fake deadlines.</p>`}
     <div class="row wrap cat-filter" role="group" aria-label="Category" style="margin-bottom:14px">
       <button class=${'btn sm' + (!cat ? ' dark' : '')} aria-pressed=${!cat} onClick=${() => setCat(null)}>All</button>
-      ${cats.map(c => html`<button class=${'btn sm' + (cat === c.id ? ' dark' : '')} aria-pressed=${cat === c.id} onClick=${() => pickCat(c.id)}>${c.name}</button>`)}
+      ${cats.filter(c => !c.archived || projects.some(p => p.category_id === c.id)).map(c => html`<button class=${'btn sm' + (cat === c.id ? ' dark' : '')} aria-pressed=${cat === c.id} onClick=${() => pickCat(c.id)}>${c.name}</button>`)}
     </div>
     ${list.length === 0 ? html`<${Empty} title=${selCat ? `No ${selCat.name} projects yet` : 'Nothing here yet'}>${selCat ? 'Use “New project” to plan one.' : 'Add a client project, a product idea or an internal initiative.'}</${Empty}>`
       : groups ? groups.map(g => html`<section key=${g.c.id ?? 'none'} class="pgroup" aria-label=${g.c.name}>
@@ -89,7 +89,7 @@ function CategoryField({ value, onChange, cats }) {
         </div>`
       : html`<select id="proj-cat" value=${value || ''} onChange=${(e) => { if (e.target.value === '__new') { e.target.value = value || ''; setCreating(true); } else onChange(+e.target.value || null); }}>
           <option value="">No category</option>
-          ${cats.map(c => html`<option value=${c.id}>${c.name}</option>`)}
+          ${cats.filter(c => !c.archived || c.id === value).map(c => html`<option value=${c.id}>${c.name}${c.archived ? ' (archived)' : ''}</option>`)}
           <option value="__new">+ Create category…</option>
         </select>`}
   </div>`;

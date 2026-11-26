@@ -145,7 +145,7 @@ app have no server to enforce them, so they keep working as before, without Team
     list of active accounts) and manages the ones they own.
   - **User**: given by a Super Admin. Their own dashboard plus the teams someone adds them to; can't
     create teams.
-  - **Super Admin**: Admin features, plus the **Users** page and a read-only **All teams** view.
+  - **Super Admin**: Admin features, plus the **Users** page and an **All teams** view with team deletion.
     Personal dashboards stay private. Nobody, a Super Admin included, can read another account's snapshot.
 - **Blocking** applies on the account's next request to the database, including from a browser that is
   already signed in. Open browsers also re-check access every 20 seconds and on focus, then switch to a
@@ -186,7 +186,7 @@ app have no server to enforce them, so they keep working as before, without Team
    select app_private.bootstrap_super_admin('auth0|64f…');
    ```
    It only works from the SQL Editor (not through the API), and it refuses to run once an active Super
-   Admin exists. Promote everyone else from the **Users** page.
+   Admin exists. Use the **Users** page to manage Admin and User roles.
 4. Deploy the Preview build. Sign in, check **Users** and **Team Work**, then run `npm run check:rls`
    with `TOKEN_A` and `TOKEN_B` of two **test** Admin accounts.
    - Preview needs its **own** Supabase project (never the Production one) and its own variables:
@@ -267,7 +267,8 @@ their teams are deleted, and the Auth0 login is untouched: Block is the way to k
 | | Owner of the team | Member | Super Admin (not a member) | Everyone else |
 |---|---|---|---|---|
 | See the team, members (name, email), tasks, scores | ✔ | ✔ | ✔ read-only | ✖ not even its name |
-| Add / remove members, rename, delete the team | ✔ | ✖ | ✖ | ✖ |
+| Add / remove members, rename the team | ✔ | ✖ | ✖ | ✖ |
+| Delete the team | ✔ | ✖ | ✔ | ✖ |
 | Create tasks | ✔ | ✔ | ✖ | ✖ |
 | Edit, reassign, delete a task | ✔ any task | tasks they created | ✖ | ✖ |
 | Change a task's status | ✔ | tasks they created or that are assigned to them | ✖ | ✖ |
@@ -342,6 +343,37 @@ For "Create an account" to work, sign-ups must be enabled on the Auth0 database 
 `INVITE_TEST_OUTBOX=/tmp/outbox.jsonl APP_URL=http://localhost:4323 SUPABASE_URL=http://localhost:54321 SUPABASE_PUBLISHABLE_KEY=sb_publishable_test node scripts/preview.js dist-test 4323`
 writes emails to that file instead of sending them (refused on Vercel). The fake server's
 `/__verify?user=<name>&v=0|1` toggles a test account's `email_verified`.
+
+## Personal workspace: setups, customization, categories, extras (migration 20261126180000)
+
+### For every account (stored in its own dashboard: private, synced, in its backups, never in teams)
+- **First login** (new accounts only): optional setups *Study* (categories Courses, Assignments, Exams +
+  views "Exams", "Due this week"), *Work* (Projects, Clients + "Due this week"), *Personal* (Personal,
+  Home, Health) or *Start blank*. A setup only adds categories and saved views, never tasks or routines.
+  New accounts no longer get starter routines or starter categories.
+- **Customize** (button on Today): show, hide and reorder Today's sections (Tasks, Calendar, Projects,
+  Focus session, Daily routines, Daily score, Next action, Today's sessions, PC Work Time) and the
+  sidebar (Projects, Learning, Challenges, Team Work, Saved views, Stats). New accounts start with
+  Tasks, Projects and Calendar on Today. Accounts that existed before keep their previous layout.
+- **Sites & social accounts** (Blogging, IPTV, Facebook, Instagram, Pinterest: the Accounts & sites
+  settings and their routines) stay on for accounts that use them and are off by default for others.
+- **Categories:** suggestions Work, Study, Personal; type a new category straight into the task or
+  project form and it's created. Settings → Categories: rename, archive / unarchive (archived ones leave
+  the pickers; old tasks and projects keep them).
+- **Extras, out of the way until needed:** *Quick add* (sidebar, or press `q` on any page) with date,
+  category and repeat; **repeating tasks** (daily, weekdays, weekly, monthly: completing one schedules
+  the next); **Saved views** (sidebar item off by default): Due this week, Overdue, My team tasks, and
+  custom views by date range and category.
+
+### Teams and permissions (database, migration 20261126180000)
+- **Team categories** (`team_categories`): the team's own, managed by the owner (Team page →
+  Categories: add, rename, archive). Members pick them on team tasks; personal categories never reach
+  a team. Archived ones stay on old tasks.
+- **PC Work Time** is private to Yasin. Before applying the migration to production, verify that
+  Yasin's Auth0 user ID is the sole active Super Admin. The migration grants that account
+  `pc_time`, and every `pc_*` function, including the agent's sync, checks the grant.
+- **One Super Admin:** the database enforces a single account with this role, and the app refuses
+  promotions to it. If multiple Super Admins already exist, the migration stops and rolls back.
 
 ## PC Work Time & Activity Details (desktop agent)
 

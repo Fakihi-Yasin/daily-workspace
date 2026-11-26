@@ -9,6 +9,7 @@ import { Stats } from './stats.js';
 import { MiniTimer } from './focus.js';
 import { TeamWork, InvitePage, UnreadNavBadge } from './teamwork.js';
 import { Profile } from './profile.js';
+import { useWorkspace, navItems, Onboarding, QuickAdd, openQuickAdd, Views } from './workspace.js';
 import { Users } from './users.js';
 
 // Team Work and Users exist only in the synced web build: the database enforces who may use them
@@ -23,6 +24,7 @@ const ROUTES = [
   ['learning', 'Learning', 'formation', Formation],
   ['challenges', 'Challenges', 'challenges', Challenges],
   ['teams', 'Team Work', 'team', TeamWork, { when: hasTeams }],
+  ['views', 'Saved views', 'list', Views],
   ['stats', 'Stats', 'stats', Stats],
   ['users', 'Users', 'users', Users, { when: isSuperAdmin }],
   ['settings', 'Settings', 'settings', Settings],
@@ -52,12 +54,21 @@ function App() {
   const r = known || ROUTES[0];
   const blocked = known && !allowed(known); // typed URL to a page this account can't use
   const Page = blocked ? NotAvailable : r[3];
+  // Sidebar: Today first, Settings last; the rest in this account's own order (Customize on Today).
+  const w = useWorkspace();
+  const order = navItems(w && w.layout) || ['projects', 'learning', 'challenges', 'teams', 'stats'];
+  const byKey = (k) => ROUTES.find(x => x[0] === k);
+  const navRoutes = [byKey('today'), ...order.map(byKey).filter(Boolean), byKey('users'), byKey('settings')]
+    .filter(x => !(x[4] && x[4].hidden) && allowed(x));
+  // The page you're on stays visible in the sidebar while you're on it, even if hidden there.
+  if (known && !blocked && !(r[4] && r[4].hidden) && !navRoutes.includes(r)) navRoutes.splice(navRoutes.length - 1, 0, r);
   useEffect(() => { if (route !== 'today') document.title = `${r[1]} · Dashboard`; }, [route]);
   return html`<div class="shell">
     <nav class="side" aria-label="Main navigation">
       <div class="brand"><i>✓</i><span>Dashboard</span></div>
-      ${ROUTES.filter(r => !(r[4] && r[4].hidden) && allowed(r)).map(([key, label, icon]) => html`<a class=${'nav-link' + (key === r[0] ? ' on' : '')} href=${'#/' + key} aria-current=${key === r[0] ? 'page' : undefined} title=${label}>
+      ${navRoutes.map(([key, label, icon]) => html`<a class=${'nav-link' + (key === r[0] ? ' on' : '')} href=${'#/' + key} aria-current=${key === r[0] ? 'page' : undefined} title=${label}>
         <${Icon} name=${icon} /><span>${label}</span>${key === 'teams' && html`<${UnreadNavBadge} />`}</a>`)}
+      <button class="nav-link quick-add-btn" onClick=${openQuickAdd} title="Quick add a task (press q)" aria-label="Quick add a task"><${Icon} name="plus" /><span>Quick add</span></button>
       <div class="side-foot">
         <${MiniTimer} />
         <${ThemeToggle} />
@@ -68,6 +79,8 @@ function App() {
     </nav>
     <main id="main">${window.__dash && window.__dash.sync && html`<${SyncBanner} />`}<${Page} key=${r[0]} sub=${rest.join('/')} superOnly=${r[0] === 'users'} /></main>
     <${Toasts} />
+    <${QuickAdd} />
+    <${Onboarding} />
   </div>`;
 }
 

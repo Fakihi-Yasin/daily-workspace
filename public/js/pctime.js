@@ -5,7 +5,8 @@ import { html, useState, Icon, Chip, Modal, Empty, toast, addDays, fmtShort } fr
 import { useRpc, change } from './teamwork.js';
 
 const guessOs = () => { const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || ''; return /win/i.test(p) ? 'windows' : /mac/i.test(p) ? 'mac' : 'linux'; };
-export const hasPcTime = () => !!(window.__dash && window.__dash.rpc);
+// Only for accounts PC Work Time was granted to (the database checks the same grant on every call).
+export const hasPcTime = () => !!(window.__dash && window.__dash.rpc && (window.__dash.features || []).includes('pc_time'));
 const mondayOf = (d) => addDays(d, -((new Date(d + 'T12:00:00Z').getUTCDay() + 6) % 7));
 // Hours and minutes only ("2 h 05 min", "6 min").
 const hm = (sec) => {

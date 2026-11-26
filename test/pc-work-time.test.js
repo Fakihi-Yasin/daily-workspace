@@ -19,6 +19,21 @@ before(async () => {
   who.SA = claimsFor('auth0|pcsuper00000000000000', { email: 'sa@example.test', name: 'SA' });
   for (const k of ['ME', 'OTHER', 'SA']) await call(k, 'register_me');
   await pg.admin('select app_private.bootstrap_super_admin($1)', ['auth0|pcsuper00000000000000']);
+  // PC Work Time is granted per account (on rollout: the Super Admin only). These test accounts get it;
+  // NOGRANT doesn't.
+  for (const u of [ME, OTHER, 'auth0|pcsuper00000000000000']) await pg.admin("insert into app_private.feature_grants (user_id, feature, granted_by) values ($1, 'pc_time', 'test')", [u]);
+  who.NOGRANT = claimsFor('auth0|pcnogrant000000000000', { email: 'nogrant@example.test', name: 'No grant' });
+  await call('NOGRANT', 'register_me');
+});
+
+test('PC Work Time is only for accounts it was granted to; the grant itself is not reachable from the API', async () => {
+  assert.deepEqual((await call('ME', 'my_access')).features, ['pc_time']);
+  assert.deepEqual((await call('NOGRANT', 'my_access')).features, []);
+  for (const [fn, args] of [['pc_device_create', { p_name: 'Laptop' }], ['pc_device_list', {}], ['pc_time_summary', { p_from: '2026-11-01', p_to: '2026-11-30' }],
+    ['pc_settings_set', { p_idle_minutes: 5 }], ['pc_history_delete', {}]]) {
+    await assert.rejects(call('NOGRANT', fn, args), /feature_not_available/, fn);
+  }
+  await assert.rejects(pg.asRequest(who.NOGRANT, (tx) => tx.query("insert into app_private.feature_grants (user_id, feature) values ($1, 'pc_time')", ['auth0|pcnogrant000000000000'])), /permission denied/);
 });
 after(() => pg && pg.close());
 

@@ -12,15 +12,42 @@ const { seedDemo } = require('../lib/demo');
 const fresh = () => open(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'dash-gen-')), 'db.sqlite'));
 const JOB_WORDS = /iptv|pinterest|whatsapp|dmca|crochet|tattoo|recipe/i;
 
-test('a new account gets general categories, starter routines and the device time zone', () => {
+test('a new account starts blank: no sample tasks, routines or categories; layout with Tasks, Calendar, Projects', () => {
   const db = fresh();
   A.ensureDefaults(db);
-  const cats = A.call(db, 'GET', '/api/categories').map(c => c.name);
-  assert.deepEqual(cats, ['Client work', 'Internal projects', 'Marketing & sales', 'Other']);
-  const routines = A.call(db, 'GET', '/api/routines').map(r => r.name);
-  assert.deepEqual(routines, ['Plan the day', 'Inbox zero', 'End-of-day review']);
+  assert.deepEqual(A.call(db, 'GET', '/api/categories').map(c => c.name), ['Other']);
+  assert.deepEqual(A.call(db, 'GET', '/api/routines'), []);
+  const today = A.call(db, 'GET', '/api/today');
+  assert.deepEqual([today.todos.length, today.tasks.length], [0, 0], 'no sample tasks');
   assert.equal(A.call(db, 'GET', '/api/bootstrap').tz, Intl.DateTimeFormat().resolvedOptions().timeZone);
-  assert.ok(!JOB_WORDS.test(JSON.stringify([cats, routines])));
+  const ws = A.call(db, 'GET', '/api/workspace');
+  assert.deepEqual(ws.onboarding, { pending: true, setup: null }, 'first login offers the starter setups');
+  const shown = ws.layout.home.order.filter(k => !ws.layout.home.hidden.includes(k));
+  assert.deepEqual(shown, ['tasks', 'projects', 'calendar']);
+  assert.equal(ws.layout.sites, false, 'no sites & social sections by default');
+  assert.ok(ws.layout.nav.hidden.includes('views'), 'saved views stay out of the way');
+  assert.deepEqual(ws.suggested, ['Work', 'Study', 'Personal']);
+});
+
+test('starter setups only add categories and views; Start blank adds nothing; everything can change later', () => {
+  const blank = fresh(); A.ensureDefaults(blank);
+  A.call(blank, 'POST', '/api/workspace/setup', { setup: 'blank' });
+  assert.deepEqual(A.call(blank, 'GET', '/api/categories').map(c => c.name), ['Other']);
+  assert.deepEqual(A.call(blank, 'GET', '/api/workspace').onboarding, { pending: false, setup: 'blank' });
+  assert.equal(A.call(blank, 'GET', '/api/today').todos.length, 0);
+
+  const study = fresh(); A.ensureDefaults(study);
+  A.call(study, 'POST', '/api/workspace/setup', { setup: 'study' });
+  assert.deepEqual(A.call(study, 'GET', '/api/categories').map(c => c.name), ['Courses', 'Assignments', 'Exams', 'Other']);
+  const ws = A.call(study, 'GET', '/api/workspace');
+  assert.deepEqual(ws.layout.views.map(v => v.name), ['Exams', 'Due this week']);
+  assert.ok(!ws.layout.nav.hidden.includes('views'), 'their saved views are in the sidebar');
+  assert.equal(A.call(study, 'GET', '/api/today').todos.length, 0, 'still no tasks');
+  // Running a setup again never duplicates; work adds its own.
+  A.call(study, 'POST', '/api/workspace/setup', { setup: 'study' });
+  A.call(study, 'POST', '/api/workspace/setup', { setup: 'work' });
+  assert.deepEqual(A.call(study, 'GET', '/api/categories').map(c => c.name), ['Courses', 'Assignments', 'Exams', 'Projects', 'Clients', 'Other']);
+  assert.throws(() => A.call(study, 'POST', '/api/workspace/setup', { setup: 'nope' }), /Unknown setup/);
 });
 
 test('the demo shows every feature with general work, and nothing job-specific', () => {

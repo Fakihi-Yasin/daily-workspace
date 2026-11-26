@@ -11,7 +11,8 @@
 // Test controls (no sign-in): /__down?v=1|0 simulates an outage; /__bootstrap?user=<name> makes
 // test|<name> the first Super Admin (what DEPLOY.md does in the Supabase SQL editor);
 // /__verify?user=<name>&v=0|1 makes that test account's email unverified / verified (like Auth0's
-// email_verified, which is false until the person clicks Auth0's confirmation email).
+// email_verified, which is false until the person clicks Auth0's confirmation email); /__grant?user=<name>
+// grants PC Work Time to that test account.
 const http = require('node:http');
 const port = +(process.argv[2] || 54321);
 let down = false;
@@ -30,6 +31,10 @@ const unverified = new Set();
     if (url.pathname === '/__bootstrap') {
       return pg.admin('select app_private.bootstrap_super_admin($1) as r', ['test|' + url.searchParams.get('user')])
         .then(r => send(200, r.rows[0]), e => send(400, { message: e.message }));
+    }
+    if (url.pathname === '/__grant') { // PC Work Time grant (production: given to the Super Admin by the migration)
+      return pg.admin("insert into app_private.feature_grants (user_id, feature, granted_by) values ($1, 'pc_time', 'test') on conflict do nothing", ['test|' + url.searchParams.get('user')])
+        .then(() => send(200, { granted: true }), e => send(400, { message: e.message }));
     }
     if (url.pathname === '/__verify') {
       const u = url.searchParams.get('user');
