@@ -1,17 +1,18 @@
-// Team invite mailer (used by api/invite.mjs on Vercel, and by scripts/preview.js in local tests).
+// Team invites (used by api/invite.mjs on Vercel, and by scripts/preview.js in local tests).
 //
 // It holds no database power of its own: every database call is made with the signed-in user's own
 // access token and the public (publishable) key, so the database decides who may invite (the team
 // owner) exactly as for any other call. The only secret here is the email provider's API key.
 //
-//   1. The email provider must be configured, or nothing is created and the answer says what's missing.
-//   2. team_invite_create (owner only; never looks up accounts, so the answer is the same whether the
-//      email is registered or not) returns a one-time token, stored hashed.
-//   3. The email is sent. Only when the provider accepted it is the invite marked 'sent' (an invite
-//      that was never sent can't be accepted) and the answer is "Invite sent". Otherwise it's
-//      marked 'failed' and the answer is an error.
+//   1. team_invite_create (owner only) saves an invitation addressed to the EMAIL. It never looks up
+//      accounts, so the answer is the same whether the address is registered or not. Any account whose
+//      verified email is that address sees it under Team Work → Invitations and can Accept it.
+//   2. If an email provider is set up, the link is also emailed; only when the provider accepted it is
+//      the answer "Invite sent". Without a provider (or if sending fails) the answer says clearly that
+//      no email was sent; the invitation still works in the app.
 
-export const MISSING_EMAIL_MESSAGE = 'Invites can’t be emailed yet: no email provider is set up for this app. No invite was sent.';
+const IN_APP = 'If this address belongs to an account with a confirmed email, they’ll find the invitation under Team Work → Invitations (or after they sign up with it).';
+export const MISSING_EMAIL_MESSAGE = 'Invitation saved, but no email was sent: no email provider is set up for this app. ' + IN_APP;
 
 export function emailConfig(env) {
   const missing = [];
@@ -97,10 +98,9 @@ export async function handleInvite({ method, headers, body }, env, fetchImpl = g
     return { status: 400, body: { message: 'Enter the full email address.' } };
   }
   const cfg = emailConfig(env);
-  if (!cfg.ok) return { status: 503, body: { code: 'email_not_configured', missing: cfg.missing, message: MISSING_EMAIL_MESSAGE } };
   const origin = appUrl(env);
-  if (!origin || !env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
-    return { status: 503, body: { code: 'server_not_configured', message: 'The invite service isn’t fully set up (APP_URL / SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY). No invite was sent.' } };
+  if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+    return { status: 503, body: { code: 'server_not_configured', message: 'The invite service isn’t set up (SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY). No invitation was saved and no email was sent.' } };
   }
   const rpc = rpcClient(env, m[1], fetchImpl);
 
@@ -113,16 +113,16 @@ export async function handleInvite({ method, headers, body }, env, fetchImpl = g
     return { status, body: { message: msg } };
   }
 
+  const saved = { saved: true, expires_at: inv.expires_at };
+  if (!cfg.ok || !origin) {
+    return { status: 200, body: { ...saved, emailed: false, code: 'email_not_configured', missing: cfg.ok ? ['APP_URL'] : cfg.missing, message: MISSING_EMAIL_MESSAGE } };
+  }
   const link = `${origin}/#/invite/${inv.token}`;
   const sent = await sendEmail(cfg, { to: inv.email, ...inviteEmail({ inviter: inv.inviter_name, team: inv.team_name, link, email: inv.email, expiresAt: inv.expires_at }) }, fetchImpl);
   if (!sent.ok) {
     await rpc('team_invite_mark', { p_invite_id: inv.id, p_status: 'failed' }).catch(() => {});
-    return { status: 502, body: { code: 'email_failed', message: `The invite email wasn’t sent: ${sent.reason}. Try again later.` } };
+    return { status: 200, body: { ...saved, emailed: false, code: 'email_failed', message: `Invitation saved, but no email was sent: ${sent.reason}. ${IN_APP}` } };
   }
-  try {
-    await rpc('team_invite_mark', { p_invite_id: inv.id, p_status: 'sent' });
-  } catch {
-    return { status: 500, body: { message: 'The email went out, but the invite couldn’t be activated. Send it again.' } };
-  }
-  return { status: 200, body: { sent: true, message: 'Invite sent', expires_at: inv.expires_at } };
+  await rpc('team_invite_mark', { p_invite_id: inv.id, p_status: 'sent' }).catch(() => {});
+  return { status: 200, body: { ...saved, emailed: true, sent: true, message: 'Invite sent' } };
 }

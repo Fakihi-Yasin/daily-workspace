@@ -71,8 +71,9 @@ export const unreadLabel = (n) => (n > 99 ? '+99' : '+' + n);
 export function UnreadNavBadge() {
   const d = useUnread();
   const n = d ? d.total : 0;
-  if (!n) return null;
-  return html`<span class="nav-badge" title=${n + ' new team task' + (n === 1 ? '' : 's')} aria-label=${n + ' new team task' + (n === 1 ? '' : 's')}>${unreadLabel(n)}</span>`;
+  const inv = d ? d.invites || 0 : 0;
+  return html`${inv > 0 && html`<span class="nav-badge invite" title=${inv + ' team invitation' + (inv === 1 ? '' : 's')} aria-label=${inv + ' team invitation' + (inv === 1 ? '' : 's')}>✉ ${inv}</span>`}
+    ${n > 0 && html`<span class="nav-badge" title=${n + ' new team task' + (n === 1 ? '' : 's')} aria-label=${n + ' new team task' + (n === 1 ? '' : 's')}>${unreadLabel(n)}</span>`}`;
 }
 async function markSeen(teamId, upto) {
   try { await rpc('team_mark_seen', { p_team_id: teamId, p_upto: upto || null }); } catch { return; }
@@ -125,6 +126,7 @@ function TeamLanding() {
   return html`<div>
     <header class="page-head"><h1>Team Work</h1><span class="muted">Private teams: only their members see them.</span></header>
     <${TeamCountTiles} />
+    <${MyInvitations} />
     <section class="section">
       <div class="section-head"><h3>${scope === 'all' ? 'All teams' : 'My teams'}</h3>
         ${isSuper() && html`<div class="seg" role="tablist" aria-label="Which teams">
@@ -332,19 +334,22 @@ function InviteMember({ teamId }) {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState(null);
+  const [note, setNote] = useState(null);
   const { data: invites, reload } = useRpc('team_invite_list', { p_team_id: teamId }, { poll: 0 });
   const valid = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email.trim());
   const send = async (e) => {
     e.preventDefault();
     if (!valid) return;
-    setBusy(true); setProblem(null);
+    setBusy(true); setProblem(null); setNote(null);
     try {
-      await window.__dash.sendInvite(teamId, email.trim());
-      toast({ msg: 'Invite sent' });
+      // Same answer for every address: whether it has an account is never shown here.
+      const r = await window.__dash.sendInvite(teamId, email.trim());
+      if (r.emailed) toast({ msg: 'Invite sent' });
+      else { toast({ msg: 'Invitation saved · no email sent' }); setNote({ email: email.trim(), text: r.message }); }
       setEmail('');
       reload();
     } catch (err) {
-      setProblem(err.code === 'email_not_configured' ? 'Invites can’t be emailed yet: no email provider is set up for this app. Nothing was sent. Ask the person who runs this workspace to set one up.' : err.message);
+      setProblem(err.message);
     } finally { setBusy(false); }
   };
   const revoke = async (i) => {
@@ -360,12 +365,49 @@ function InviteMember({ teamId }) {
       <button class="btn primary" disabled=${busy || !valid}><${Icon} name="plus" size=${16} />${busy ? 'Sending…' : 'Send invite'}</button>
     </form>
     ${problem && html`<p class="notice" role="alert">${problem}</p>`}
-    <p class="hint">They get an email with a link that works once, for 7 days. They sign in or create an account with that email, confirm it, and join this team only. Their role doesn’t change.</p>
+    ${note && html`<p class="notice" role="status"><strong>No email was sent to ${note.email}.</strong> ${note.text.replace(/^Invitation saved, but no email was sent: /, '').replace(/^./, c => c.toUpperCase())}</p>`}
+    <p class="hint">The invitation waits under Team Work → Invitations for whoever has that confirmed email, and is also emailed when email is set up. They join this team only, and only when they click Accept. It works once, for 7 days; their role doesn’t change.</p>
     ${invites && invites.length > 0 && html`<div><p class="small muted" style="margin:4px 0 6px">Waiting for an answer</p>
       <ul class="invite-list">${invites.map(i => html`<li key=${i.id}><span class="em">${i.email}</span>
-        <span class="small muted">sent ${fmtWhen(i.sent_at)} · expires ${fmtWhen(i.expires_at)}</span><span class="spacer"></span>
+        <span class="small muted">${i.emailed ? 'emailed ' + fmtWhen(i.sent_at) : 'in the app only (no email) · ' + fmtWhen(i.created_at)} · expires ${fmtWhen(i.expires_at)}</span><span class="spacer"></span>
         <button class="btn sm" onClick=${() => revoke(i)}>Cancel invite</button></li>`)}</ul></div>`}
   </section>`;
+}
+
+// Team Work → Invitations: open invitations for this account's confirmed email. Joining needs Accept.
+function MyInvitations() {
+  const { data, reload } = useRpc('my_invites', {});
+  const [busy, setBusy] = useState(null);
+  if (!data) return null;
+  if (!data.email_verified) {
+    return data.waiting > 0 ? html`<section class="section"><div class="section-head"><h3>Invitations</h3></div>
+      <p class="notice" role="note">You have ${data.waiting === 1 ? 'a team invitation' : data.waiting + ' team invitations'}. Confirm your email address (open the confirmation email from sign-up), then reload this page to see ${data.waiting === 1 ? 'it' : 'them'}.</p></section>` : null;
+  }
+  if (!data.invites.length) return null;
+  const act = async (i, accept) => {
+    setBusy(i.id);
+    try {
+      if (accept) {
+        const r = await rpc('my_invite_accept', { p_invite_id: i.id });
+        bus.emit(false); refreshUnread();
+        toast({ msg: `You joined “${i.team_name}”` });
+        location.hash = '#/teams/' + r.team_id;
+      } else {
+        await rpc('my_invite_decline', { p_invite_id: i.id });
+        toast({ msg: 'Invitation declined' });
+        reload(); refreshUnread();
+      }
+    } catch (e) { toast({ msg: e.message, kind: 'error' }); reload(); }
+    finally { setBusy(null); }
+  };
+  return html`<section class="section" aria-labelledby="inv-h"><div class="section-head"><h3 id="inv-h">Invitations</h3><span class="muted small">${data.invites.length} waiting</span></div>
+    <div class="stack">${data.invites.map(i => html`<div class="card flat row wrap invitation" key=${i.id}>
+      <${Avatar} p=${i.inviter} size=${36} />
+      <div style="flex:1;min-width:200px"><strong>${i.inviter.name}</strong> invited you to join <strong>“${i.team_name}”</strong>
+        <div class="small muted">${fmtWhen(i.invited_at)} · expires ${fmtWhen(i.expires_at)} · joining gives you this team only</div></div>
+      <button class="btn" disabled=${busy === i.id} onClick=${() => act(i, false)}>Decline</button>
+      <button class="btn primary" disabled=${busy === i.id} onClick=${() => act(i, true)}>Accept</button>
+    </div>`)}</div></section>`;
 }
 
 // Deleting a team: the owner, or any Super Admin (the database checks it and writes the audit log).
@@ -547,7 +589,7 @@ function StartModal({ p, ctx, onClose }) {
 // ---------- activity ----------
 const EVENT_TEXT = {
   team_created: 'created the team', team_renamed: 'renamed the team to', member_added: 'added', member_removed: 'removed',
-  member_invited: 'sent an invite to', invite_accepted: 'joined by invite:',
+  member_invited: 'invited', invite_accepted: 'joined by invite:', invite_declined: 'declined the invite for',
   task_created: 'added the task', task_status: 'changed a status →', task_assigned: 'assigned', task_edited: 'edited', task_deleted: 'deleted the task',
   project_added: 'planned', project_started: 'moved to active work:',
 };

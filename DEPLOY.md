@@ -286,23 +286,25 @@ then serve it with `node scripts/preview.js dist-test 4323`. Open
 `http://localhost:54321/__bootstrap?user=<name>` to make the test account `test|<name>` the first
 Super Admin. `npm test` includes `test/roles-teams.test.js`, which runs the same SQL.
 
-## Invites, profiles, unread badges, Super Admin team delete (migration 20261126120000)
+## Invites, profiles, unread badges, Super Admin team delete (migrations 20261126120000, 20261126150000)
 
 ### What it does
 - **Private directory:** `team_member_directory`, `team_member_candidates`, `team_add_member` (by email)
   and `team_add_member_id` require an active **Super Admin**; `team_create_with_members` takes members
   from a Super Admin only. A regular Admin's People → Add member is a single email field: no list,
   no search, no account count.
-- **Invites by email:** the owner types the full email → `POST /api/invite` (Vercel Function,
-  `api/invite.mjs`). The function has no database power: it calls the database with the owner's own
-  token. `team_invite_create` (owner only) never looks at accounts, so the answer is identical for a
-  registered and an unregistered email. It stores only a SHA-256 hash of a random 64-character token.
-  The email is sent; **only after the provider accepts it** is the invite marked `sent` and the owner
-  sees "Invite sent". If sending fails, it is marked `failed` and can never be used. An invite works
-  **once**, for **7 days**, and only for a signed-in active account whose **verified** email equals the
-  invited one; it adds that account to that team only and never changes its role. A new invite to the
-  same email replaces the old one; the owner can cancel pending invites. At most 50 invites per owner
-  per 24 hours.
+- **Invites (in the app, plus email when set up):** the owner types the full email → `POST /api/invite`
+  (Vercel Function, `api/invite.mjs`). The function has no database power: it calls the database with
+  the owner's own token. `team_invite_create` (owner only) saves an invitation **addressed to the
+  email**; it never looks up accounts, so a regular Admin learns nothing about who is registered and
+  every address gets the same answer. Any signed-in account whose **verified** email is that address
+  sees it under **Team Work → Invitations** (a blue ✉ badge on Team Work) and joins only by clicking
+  **Accept** (or **Decline**); this needs no email provider. If a provider is set up, the link is also
+  emailed and the owner sees "Invite sent"; otherwise (or if sending fails) the owner sees "No email was
+  sent" and the invitation still works in the app. Tokens are stored as SHA-256 hashes; an invite works
+  **once**, for **7 days**, adds that account to that team only and never changes its role. A new
+  invite to the same email replaces the old one; the owner can cancel pending invites (listed as
+  "emailed" or "in the app only"). At most 50 invites per owner per 24 hours.
 - **Invite link:** `https://<app>/#/invite/<token>`. The token stays in the URL hash (never sent to
   the server) and survives sign-in, sign-up ("Create an account" on the sign-in screen) and switching
   accounts. Someone who just signed up and hasn't confirmed their email sees "Confirm your email", then
@@ -322,9 +324,9 @@ Super Admin. `npm test` includes `test/roles-teams.test.js`, which runs the same
   activity, pending invites) and needs the team name typed. Accounts, personal dashboards and other
   teams are untouched. Every team deletion is in the audit log (who, team name, when, counts).
 
-### Email provider (required for invites)
-Without it the app refuses to invite ("Invites can't be emailed yet… No invite was sent") and creates
-nothing. Set these in Vercel → Settings → Environment Variables (Production), then redeploy:
+### Email provider (optional: needed only to email the link)
+Without it invitations still work in the app for existing accounts with a confirmed email (and for
+people who later sign up with the invited email); the owner is told that no email was sent. Set these in Vercel → Settings → Environment Variables (Production), then redeploy:
 
 | Name | Value |
 |---|---|

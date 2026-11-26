@@ -56,31 +56,81 @@ before(async () => {
 after(() => pg && pg.close());
 
 let T1, T2;
-test('invite by email: no provider configured → refused before anything is created, never "Invite sent"', async () => {
+const NOMAIL = { ...ENV, RESEND_API_KEY: '', INVITE_FROM_EMAIL: '' };
+test('no email provider: the invitation is saved, the answer says clearly that no email was sent, and is the same for any address', async () => {
   T1 = (await call('OWN', 'team_create', { p_name: 'Launch crew' })).id;
   T2 = (await call('OWN', 'team_create', { p_name: 'Second team' })).id;
-  const r = await post('OWN', { team_id: T1, email: 'someone@example.test' }, { ...ENV, RESEND_API_KEY: '', INVITE_FROM_EMAIL: '' });
-  assert.equal(r.status, 503);
-  assert.equal(r.body.code, 'email_not_configured');
-  assert.deepEqual(r.body.missing, ['RESEND_API_KEY', 'INVITE_FROM_EMAIL']);
-  assert.notEqual(r.body.sent, true);
-  assert.equal((await pg.admin('select count(*)::int n from public.team_invites')).rows[0].n, 0, 'no invite row');
+  const reg = await post('OWN', { team_id: T2, email: 'out@example.test' }, NOMAIL); // registered + verified
+  const unreg = await post('OWN', { team_id: T2, email: 'nobody-here@example.test' }, NOMAIL); // never signed up
+  for (const r of [reg, unreg]) {
+    assert.equal(r.status, 200);
+    assert.deepEqual([r.body.saved, r.body.emailed, r.body.sent, r.body.code], [true, false, undefined, 'email_not_configured']);
+    assert.match(r.body.message, /no email was sent/);
+    assert.deepEqual(r.body.missing, ['RESEND_API_KEY', 'INVITE_FROM_EMAIL']);
+  }
+  assert.deepEqual(reg.body.message, unreg.body.message, 'nothing reveals which address has an account');
+  assert.deepEqual(Object.keys(reg.body).sort(), Object.keys(unreg.body).sort());
+  assert.equal(sentMail.length, 0, 'no email');
   // The test outbox can never be used on Vercel.
-  assert.equal((await post('OWN', { team_id: T1, email: 'x@example.test' }, { ...ENV, RESEND_API_KEY: '', INVITE_FROM_EMAIL: '', INVITE_TEST_OUTBOX: '/tmp/x', VERCEL: '1' })).status, 503);
+  assert.equal((await post('OWN', { team_id: T2, email: 'x@example.test' }, { ...NOMAIL, INVITE_TEST_OUTBOX: '/tmp/x', VERCEL: '1' })).body.emailed, false);
+  await pg.admin("update public.team_invites set status = 'revoked' where email = 'x@example.test'");
+});
+
+test('in-app invitation: the registered recipient sees it under Invitations and joins only that team, only on Accept', async () => {
+  // Before accepting: listed for them, not a member, nothing else visible.
+  let mine = await call('OUT', 'my_invites');
+  assert.equal(mine.email_verified, true);
+  assert.deepEqual(mine.invites.map(i => [i.team_name, i.inviter.name]), [['Second team', 'OSM BEN']]);
+  assert.equal((await call('OUT', 'team_unread')).invites, 1);
+  assert.deepEqual(await call('OUT', 'team_list', { p_scope: 'mine' }), []);
+  await assert.rejects(call('OUT', 'team_get', { p_team_id: T2 }), /Team not found/);
+  // Other accounts can't see, accept or decline it.
+  assert.deepEqual((await call('MEM', 'my_invites')).invites, []);
+  await assert.rejects(call('MEM', 'my_invite_accept', { p_invite_id: mine.invites[0].id }), /Invite not found/);
+  await assert.rejects(call('MEM', 'my_invite_decline', { p_invite_id: mine.invites[0].id }), /Invite not found/);
+  // The owner sees it pending, "in the app only"; regular Admins never get account details.
+  const pending = await call('OWN', 'team_invite_list', { p_team_id: T2 });
+  assert.deepEqual(pending.map(i => [i.email, i.emailed]).sort(), [['nobody-here@example.test', false], ['out@example.test', false]]);
+  assert.ok(pending.every(i => Object.keys(i).sort().join() === 'created_at,email,emailed,expires_at,id,sent_at'), 'no name, account id or registration flag');
+  // Accept.
+  assert.deepEqual(await call('OUT', 'my_invite_accept', { p_invite_id: mine.invites[0].id }), { team_id: T2 });
+  assert.deepEqual((await call('OUT', 'team_list', { p_scope: 'mine' })).map(t => [t.name, t.my_role]), [['Second team', 'member']]);
+  await assert.rejects(call('OUT', 'team_get', { p_team_id: T1 }), /Team not found/, 'only that team');
+  assert.equal((await call('OUT', 'my_access')).role, 'admin', 'role unchanged');
+  await assert.rejects(call('OUT', 'my_invite_accept', { p_invite_id: mine.invites[0].id }), /already used/);
+  assert.deepEqual((await call('OUT', 'my_invites')).invites, []);
+  assert.equal((await call('OUT', 'team_unread')).invites, 0);
+  // An unconfirmed email sees only that something is waiting, after confirming it shows up.
+  const later = 'auth0|later000000000000000';
+  const unv = claimsFor(later, { email: 'nobody-here@example.test', name: 'Later', verified: false });
+  await call(unv, 'register_me');
+  assert.deepEqual(await call(unv, 'my_invites'), { email_verified: false, waiting: 1, invites: [] });
+  await assert.rejects(call(unv, 'my_invite_accept', { p_invite_id: pending.find(i => i.email === 'nobody-here@example.test').id }), /Confirm your email/);
+  const ver = claimsFor(later, { email: 'nobody-here@example.test', name: 'Later', verified: true });
+  await call(ver, 'register_me');
+  const inv = (await call(ver, 'my_invites')).invites;
+  assert.equal(inv.length, 1);
+  // Decline: it disappears, nobody joins, the owner sees it gone.
+  await call(ver, 'my_invite_decline', { p_invite_id: inv[0].id });
+  assert.deepEqual((await call(ver, 'my_invites')).invites, []);
+  await assert.rejects(call(ver, 'team_get', { p_team_id: T2 }), /Team not found/);
+  assert.deepEqual(await call('OWN', 'team_invite_list', { p_team_id: T2 }), []);
+  // Leave T2 as it was for the later tests.
+  await call('OWN', 'team_remove_member', { p_team_id: T2, p_user_id: OUT });
 });
 
 test('invite by email: the same answer for a registered and an unregistered address; only the owner can invite', async () => {
   const a = await post('OWN', { team_id: T1, email: 'bianco@example.test' }); // registered
   const b = await post('OWN', { team_id: T1, email: 'New.Person@Example.test' }); // never signed up
-  assert.deepEqual([a.status, a.body.sent, a.body.message], [200, true, 'Invite sent']);
-  assert.deepEqual([b.status, b.body.sent, b.body.message], [200, true, 'Invite sent']);
+  assert.deepEqual([a.status, a.body.sent, a.body.emailed, a.body.message], [200, true, true, 'Invite sent']);
+  assert.deepEqual([b.status, b.body.sent, b.body.emailed, b.body.message], [200, true, true, 'Invite sent']);
   assert.deepEqual(Object.keys(a.body).sort(), Object.keys(b.body).sort(), 'identical shape');
   assert.equal(sentMail.length, 2);
   assert.deepEqual(sentMail.map(x => x.to[0]), ['bianco@example.test', 'new.person@example.test']);
   assert.match(sentMail[0].subject, /OSM BEN invited you to the team “Launch crew”/);
   assert.match(sentMail[0].text, /https:\/\/app\.example\.test\/#\/invite\/[a-f0-9]{64}/);
   // Only a hash of the token is stored.
-  const rows = (await pg.admin('select token_hash, status from public.team_invites order by created_at')).rows;
+  const rows = (await pg.admin('select token_hash, status from public.team_invites where team_id = $1 order by created_at', [T1])).rows;
   assert.ok(rows.every(r => r.status === 'sent' && !sentMail.some(m => m.text.includes(r.token_hash))));
   // Members, other Admins and the Super Admin (not owner) can't invite to this team; signed-out neither.
   assert.equal((await post('OUT', { team_id: T1, email: 'z@example.test' })).status, 404);
@@ -91,19 +141,15 @@ test('invite by email: the same answer for a registered and an unregistered addr
   assert.equal(sentMail.length, 2, 'nothing else was emailed');
 });
 
-test('a failed email is reported as an error and its invite can never be used', async () => {
+test('a failed email says no email was sent; never "Invite sent"', async () => {
   mailFails = true;
   const r = await post('OWN', { team_id: T1, email: 'fail@example.test' });
   mailFails = false;
-  assert.equal(r.status, 502);
-  assert.notEqual(r.body.sent, true);
-  assert.match(r.body.message, /wasn’t sent/);
-  assert.equal((await pg.admin("select status from public.team_invites where email = 'fail@example.test'")).rows[0].status, 'failed');
-  // An invite the mailer never marked as sent can't be accepted either.
-  const raw = await call('OWN', 'team_invite_create', { p_team_id: T1, p_email: 'out@example.test' });
-  assert.equal((await call('OUT', 'team_invite_peek', { p_token: raw.token })).state, 'invalid');
-  await assert.rejects(call('OUT', 'team_invite_accept', { p_token: raw.token }), /isn't valid/);
-  await call('OWN', 'team_invite_revoke', { p_invite_id: raw.id });
+  assert.equal(r.status, 200);
+  assert.deepEqual([r.body.saved, r.body.emailed, r.body.sent, r.body.code], [true, false, undefined, 'email_failed']);
+  assert.match(r.body.message, /no email was sent: the email service refused it \(HTTP 403/);
+  assert.equal((await pg.admin("select status from public.team_invites where email = 'fail@example.test'")).rows[0].status, 'pending');
+  await call('OWN', 'team_invite_revoke', { p_invite_id: (await call('OWN', 'team_invite_list', { p_team_id: T1 })).find(i => i.email === 'fail@example.test').id });
 });
 
 test('an unregistered invitee registers, confirms the same email, and joins that team only, once', async () => {
@@ -197,27 +243,27 @@ test('profiles: own display name and photo; avatars visible to teammates and Sup
 
 test('unread: two tasks created by a teammate while the other is away show +2 until they open that board', async () => {
   // Joined just now: nothing old counts.
-  assert.deepEqual(await call('MEM', 'team_unread'), { total: 0, teams: {} });
+  assert.deepEqual(await call('MEM', 'team_unread'), { total: 0, teams: {}, invites: 0 });
   await call('OWN', 'team_task_create', { p_team_id: T1, p_title: 'Draft the brief' });
   await call('OWN', 'team_task_create', { p_team_id: T1, p_title: 'Book the venue', p_assignee_id: MEM });
   // Their own tasks don't count for them; edits and status changes don't count for anyone.
   const mine = (await call('MEM', 'team_task_create', { p_team_id: T1, p_title: 'My own idea' })).id;
   await call('MEM', 'team_task_update', { p_task_id: mine, p_patch: { title: 'My own idea v2', status: 'in_progress' } });
-  assert.deepEqual(await call('MEM', 'team_unread'), { total: 2, teams: { [T1]: 2 } });
+  assert.deepEqual(await call('MEM', 'team_unread'), { total: 2, teams: { [T1]: 2 }, invites: 0 });
   const ownerView = await call('OWN', 'team_unread');
   assert.equal(ownerView.teams[T1], 1, 'the owner sees only the member’s task');
   // Opening the board: tasks load, then that team is marked seen (survives reloads and devices).
   const board = await call('MEM', 'team_get', { p_team_id: T1 });
   assert.ok(board.loaded_at);
   await call('MEM', 'team_mark_seen', { p_team_id: T1, p_upto: board.loaded_at });
-  assert.deepEqual(await call('MEM', 'team_unread'), { total: 0, teams: {} });
+  assert.deepEqual(await call('MEM', 'team_unread'), { total: 0, teams: {}, invites: 0 });
   assert.equal((await call('OWN', 'team_unread')).teams[T1], 1, 'only the caller’s count was cleared');
   // A task added after the board loaded still counts.
   await call('OWN', 'team_task_create', { p_team_id: T1, p_title: 'Later task' });
   await call('MEM', 'team_mark_seen', { p_team_id: T1, p_upto: board.loaded_at });
-  assert.deepEqual(await call('MEM', 'team_unread'), { total: 1, teams: { [T1]: 1 } });
+  assert.deepEqual(await call('MEM', 'team_unread'), { total: 1, teams: { [T1]: 1 }, invites: 0 });
   // Outsiders and a non-member Super Admin: nothing counted, nothing written.
-  assert.deepEqual(await call('OUT', 'team_unread'), { total: 0, teams: {} });
+  assert.deepEqual(await call('OUT', 'team_unread'), { total: 0, teams: {}, invites: 0 });
   await call('SA', 'team_mark_seen', { p_team_id: T1 });
   assert.equal((await pg.admin('select count(*)::int n from public.team_task_seen where user_id = $1', [SA])).rows[0].n, 0);
   await assert.rejects(call('OUT', 'team_mark_seen', { p_team_id: T1 }), /Team not found/);
@@ -243,7 +289,7 @@ test('Super Admin deletes any team (not a member); others cannot; audited; nothi
     assert.equal((await pg.admin(`select count(*)::int n from public.${t} where team_id = $1`, [T1])).rows[0].n, 0, t);
   }
   // Accounts, personal dashboards and the other team are untouched.
-  assert.equal((await call('SA', 'admin_list_users')).length, 6);
+  assert.equal((await call('SA', 'admin_list_users')).length, 7);
   assert.equal((await call('MEM', 'get_snapshot', { p_slot: 'real', p_with_data: false })).rev, 'mem-rev-1');
   assert.equal((await call('OWN', 'team_get', { p_team_id: T2 })).tasks.length, 1);
   assert.equal((await call('MEM', 'my_access')).role, 'admin');

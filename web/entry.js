@@ -122,7 +122,7 @@ async function start() {
       window.__dash.profile = me.profile || window.__dash.profile;
       return me;
     } : null,
-    // Team invites are emailed by /api/invite (see api/_invite.mjs). "Invite sent" only when it was.
+    // Team invites: /api/invite saves the invitation and emails it when a provider is set up (api/_invite.mjs).
     sendInvite: rpc ? async (teamId, email) => {
       let token;
       try { token = await auth.getToken(); } catch (e) { throw Object.assign(new Error('Sign in again to send invites.'), { auth: true }); }
@@ -132,7 +132,8 @@ async function start() {
       } catch { throw Object.assign(new Error('No connection to the server. No invite was sent.'), { offline: true }); }
       let body = null;
       try { body = await res.json(); } catch { body = null; }
-      if (!res.ok || !body || body.sent !== true) throw Object.assign(new Error((body && body.message) || `The invite wasn’t sent (HTTP ${res.status}).`), { status: res.status, code: body && body.code, missing: body && body.missing });
+      // 200 = the invitation is saved; body.emailed says whether an email actually went out.
+      if (!res.ok || !body || body.saved !== true) throw Object.assign(new Error((body && body.message) || `The invite wasn’t sent (HTTP ${res.status}).`), { status: res.status, code: body && body.code, missing: body && body.missing });
       return body;
     } : null,
     clearPendingInvite: () => { try { window.localStorage.removeItem(PENDING_INVITE); } catch { /* none */ } },
