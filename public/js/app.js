@@ -29,7 +29,7 @@ const ROUTES = [
   ['users', 'Users', 'users', Users, { when: isSuperAdmin }],
   ['settings', 'Settings', 'settings', Settings],
   ['invite', 'Team invite', 'team', InvitePage, { when: hasTeams, hidden: true }],
-  ['profile', 'Profile', 'users', Profile, { when: hasTeams, hidden: true }],
+  ['profile', 'Profile', 'users', Profile, { when: hasTeams }],
 ];
 const allowed = (r) => !(r[4] && r[4].when) || r[4].when();
 
@@ -58,7 +58,7 @@ function App() {
   const w = useWorkspace();
   const order = navItems(w && w.layout) || ['projects', 'learning', 'challenges', 'teams', 'stats'];
   const byKey = (k) => ROUTES.find(x => x[0] === k);
-  const navRoutes = [byKey('today'), ...order.map(byKey).filter(Boolean), byKey('users'), byKey('settings')]
+  const navRoutes = [byKey('today'), ...order.map(byKey).filter(Boolean), byKey('users'), byKey('profile'), byKey('settings')]
     .filter(x => !(x[4] && x[4].hidden) && allowed(x));
   // The page you're on stays visible in the sidebar while you're on it, even if hidden there.
   if (known && !blocked && !(r[4] && r[4].hidden) && !navRoutes.includes(r)) navRoutes.splice(navRoutes.length - 1, 0, r);
@@ -88,11 +88,14 @@ function Account() {
   const u = window.__dash.user;
   const [, tick] = useState(0);
   useEffect(() => { const f = () => tick(x => x + 1); addEventListener('dash-profile', f); return () => removeEventListener('dash-profile', f); }, []);
-  const p = window.__dash.profile;
+  const profile = window.__dash.profile || { id: u.id, name: u.name || u.email };
+  const identity = html`<${Avatar} p=${profile} size=${30} />
+    <span class="account-text"><span class="account-id">${profile.name}</span>
+      ${u.email && u.email.toLowerCase() !== (profile.name || '').trim().toLowerCase()
+        && html`<span class="account-id small">${u.email}</span>`}</span>`;
   return html`<div class="account">
-    ${p ? html`<a class="account-link" href="#/profile" title="Your profile (name and photo)"><${Avatar} p=${p} size=${30} />
-        <span class="account-text"><span class="account-id">${p.name}</span><span class="account-id" style="font-size:11px">${u.email || ''}</span></span></a>`
-      : html`<span class="account-id" title=${u.email}>${u.email || u.name}</span>`}
+    ${hasTeams() ? html`<a class="account-link" href="#/profile" title="Your profile (name and photo)">${identity}</a>`
+      : html`<div class="account-link">${identity}</div>`}
     ${window.__dash.role && html`<span class="account-role">${window.__dash.role === 'super_admin' ? 'Super Admin' : window.__dash.role === 'admin' ? 'Admin' : 'User'}</span>`}
     <button class="account-out" onClick=${() => window.__dash.logout()} title="Sign out" aria-label="Sign out"><${Icon} name="logout" size=${16} /><span>Sign out</span></button>
   </div>`;
@@ -110,7 +113,7 @@ const SYNC_LABEL = { idle: 'Saving…', saving: 'Saving…', synced: 'Synced', o
 function SyncBadge() {
   const [s] = useSync();
   if (!s) return null;
-  const bad = ['offline', 'error', 'signin', 'conflict'].includes(s.state);
+  const bad = ['offline', 'error', 'conflict'].includes(s.state);
   const label = s.state === 'synced' && s.pending ? 'Saving…' : SYNC_LABEL[s.state] || s.state;
   return html`<a class=${'sync-badge' + (bad ? ' bad' : '')} href="#/settings?tab=backup" role="status" aria-live="polite"
     title=${s.error || (s.lastSync ? 'Last synced ' + new Date(s.lastSync).toLocaleTimeString() : label)}>
@@ -120,7 +123,7 @@ function SyncBadge() {
 function SyncBanner() {
   const [s, sync] = useSync();
   const [busy, setBusy] = useState(false);
-  if (!s || !['offline', 'error', 'signin', 'conflict'].includes(s.state)) return null;
+  if (!s || !['offline', 'error', 'conflict'].includes(s.state)) return null;
   const run = (fn) => async () => { setBusy(true); try { await fn(); } catch (e) { alert(e.message || e); } finally { setBusy(false); } };
   if (s.state === 'conflict') {
     return html`<div class="sync-banner conflict" role="alert">
@@ -132,12 +135,10 @@ function SyncBanner() {
       </div></div>`;
   }
   return html`<div class=${'sync-banner ' + s.state} role="alert">
-    <p><strong>${s.state === 'offline' ? 'Offline.' : s.state === 'signin' ? 'Sync needs you to sign in again.' : 'Sync failed.'}</strong>
+    <p><strong>${s.state === 'offline' ? 'Offline.' : 'Sync failed.'}</strong>
       ${' '}${s.state === 'error' ? s.error + '. ' : ''}${s.pending ? 'Your latest changes are saved in this browser and will be sent when sync works again — don’t clear this browser’s data.' : 'Your data is up to date on this device.'}</p>
     <div class="row wrap">
-      ${s.state === 'signin'
-        ? html`<button class="btn sm dark" onClick=${() => sync.signInAgain()}>Sign in again</button>`
-        : html`<button class="btn sm" disabled=${busy} onClick=${run(sync.retry)}>Retry now</button>`}
+      <button class="btn sm" disabled=${busy} onClick=${run(sync.retry)}>Retry now</button>
     </div></div>`;
 }
 

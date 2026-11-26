@@ -114,14 +114,14 @@ export async function handleInvite({ method, headers, body }, env, fetchImpl = g
   }
 
   const saved = { saved: true, expires_at: inv.expires_at };
+  const link = origin ? `${origin}/#/invite/${inv.token}` : null;
   if (!cfg.ok || !origin) {
-    return { status: 200, body: { ...saved, emailed: false, code: 'email_not_configured', missing: cfg.ok ? ['APP_URL'] : cfg.missing, message: MISSING_EMAIL_MESSAGE } };
+    return { status: 200, body: { ...saved, emailed: false, code: 'email_not_configured', missing: cfg.ok ? ['APP_URL'] : cfg.missing, invite_url: link, message: MISSING_EMAIL_MESSAGE } };
   }
-  const link = `${origin}/#/invite/${inv.token}`;
   const sent = await sendEmail(cfg, { to: inv.email, ...inviteEmail({ inviter: inv.inviter_name, team: inv.team_name, link, email: inv.email, expiresAt: inv.expires_at }) }, fetchImpl);
   if (!sent.ok) {
     await rpc('team_invite_mark', { p_invite_id: inv.id, p_status: 'failed' }).catch(() => {});
-    return { status: 200, body: { ...saved, emailed: false, code: 'email_failed', message: `Invitation saved, but no email was sent: ${sent.reason}. ${IN_APP}` } };
+    return { status: 200, body: { ...saved, emailed: false, code: 'email_failed', invite_url: link, message: `Invitation saved, but no email was sent: ${sent.reason}. ${IN_APP}` } };
   }
   await rpc('team_invite_mark', { p_invite_id: inv.id, p_status: 'sent' }).catch(() => {});
   return { status: 200, body: { ...saved, emailed: true, sent: true, message: 'Invite sent' } };

@@ -268,11 +268,12 @@ their teams are deleted, and the Auth0 login is untouched: Block is the way to k
 |---|---|---|---|---|
 | See the team, members (name, email), tasks, scores | ✔ | ✔ | ✔ read-only | ✖ not even its name |
 | Add / remove members, rename the team | ✔ | ✖ | ✖ | ✖ |
-| Delete the team | ✔ | ✖ | ✔ | ✖ |
+| Delete the team | Super Admin only | ✖ | ✔ | ✖ |
 | Create tasks | ✔ | ✔ | ✖ | ✖ |
 | Edit, reassign, delete a task | ✔ any task | tasks they created | ✖ | ✖ |
 | Change a task's status | ✔ | tasks they created or that are assigned to them | ✖ | ✖ |
-| Future projects (add, edit, move into active work) | ✔ | ✖ | ✖ | ✖ |
+| Add future projects | ✔ | ✔ | ✖ | ✖ |
+| Edit or move future projects into active work | ✔ | ✖ | ✖ | ✖ |
 
 Only current members can be assignees. Removing a member unassigns their tasks in that team.
 **Daily team score** for a selected day: the tasks assigned to the member and due that day that were
@@ -320,7 +321,7 @@ Super Admin. `npm test` includes `test/roles-teams.test.js`, which runs the same
   **created by someone else** after that, in teams the user is a member of. Opening a team's board
   clears only that team, once its tasks have loaded; opening the Team Work list clears nothing. Own
   tasks, edits and status changes never count. Existing memberships started at "seen" on rollout.
-- **Team delete:** the owner (unchanged) or **any Super Admin**, also from Team Work → All teams → ⋯ →
+- **Team delete:** the **Super Admin** can delete a team from its header or Team Work → All teams → ⋯ →
   Delete team. The dialog names the team and what is deleted (tasks, future projects, scores,
   activity, pending invites) and needs the team name typed. Accounts, personal dashboards and other
   teams are untouched. Every team deletion is in the audit log (who, team name, when, counts).
@@ -343,6 +344,16 @@ For "Create an account" to work, sign-ups must be enabled on the Auth0 database 
 `INVITE_TEST_OUTBOX=/tmp/outbox.jsonl APP_URL=http://localhost:4323 SUPABASE_URL=http://localhost:54321 SUPABASE_PUBLISHABLE_KEY=sb_publishable_test node scripts/preview.js dist-test 4323`
 writes emails to that file instead of sending them (refused on Vercel). The fake server's
 `/__verify?user=<name>&v=0|1` toggles a test account's `email_verified`.
+
+## Team board and remarks (migration 20261126190000)
+
+Take a fresh production backup of the application tables before applying this migration. Apply it before
+deploying the web build. Existing cards retain their order until someone moves them. Dragging a card
+within or between status columns saves its position. The status selector also moves the card.
+Only members can read or post remarks in their teams. The remark author, task creator, assignee,
+or team owner can mark a remark Checked. The task status remains independent. Only the Super Admin
+can delete a team, and members may create future projects. If invitation email is unavailable,
+the owner gets a link they can pass to the intended recipient. Acceptance still checks the verified email.
 
 ## Personal workspace: setups, customization, categories, extras (migration 20261126180000)
 

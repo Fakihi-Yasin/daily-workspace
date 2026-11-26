@@ -103,3 +103,38 @@ test('one Super Admin: nobody can be promoted from the app', async () => {
   await call('SA', 'admin_set_role', { p_user_id: OWN, p_role: 'admin' });
   assert.equal((await pg.admin("select count(*)::int n from public.app_users where role = 'super_admin'")).rows[0].n, 1);
 });
+
+test('six board tasks, cross-column move, same-column reorder and scoped remark thread', async () => {
+  const team = (await call('OWN', 'team_create', { p_name: 'Board and remarks' })).id;
+  const invite = await call('OWN', 'team_invite_create', { p_team_id: team, p_email: 'mem@example.test' });
+  await call('MEM', 'my_invite_accept', { p_invite_id: invite.id });
+  const ids = [];
+  for (let i = 0; i < 6; i++) {
+    ids.push((await call('OWN', 'team_task_create', {
+      p_team_id: team, p_title: 'Card ' + i, p_assignee_id: i < 2 ? MEM : null,
+    })).id);
+  }
+  const board = () => call('MEM', 'team_get', { p_team_id: team });
+  assert.equal((await board()).tasks.filter(t => t.status === 'todo').length, 6);
+  await call('MEM', 'team_task_move', { p_task_id: ids[0], p_status: 'in_progress' });
+  await call('MEM', 'team_task_move', { p_task_id: ids[1], p_status: 'todo', p_before_id: ids[3] });
+  const moved = (await board()).tasks;
+  assert.equal(moved.find(t => t.id === ids[0]).status, 'in_progress');
+  assert.deepEqual(moved.filter(t => t.status === 'todo').map(t => t.id), [ids[2], ids[1], ids[3], ids[4], ids[5]]);
+  await refused(call('MEM', 'team_task_move', { p_task_id: ids[2], p_status: 'done' }), /only move tasks/);
+  await refused(call('MEM', 'team_task_move', { p_task_id: ids[1], p_status: 'todo', p_before_id: ids[0] }), /drop position changed/);
+  const remark = await call('OWN', 'team_remark_add', { p_task_id: ids[0], p_body: 'Can you check this?', p_urgent: true });
+  assert.equal((await board()).tasks.find(t => t.id === ids[0]).urgent_remark, true);
+  await refused(call('SA', 'team_remarks', { p_task_id: ids[0] }), /Only team members/);
+  await refused(call('OUT', 'team_remarks', { p_task_id: ids[0] }), /Team not found/);
+  await refused(call('MEM', 'team_remark_add', { p_task_id: ids[1], p_body: 'Wrong task', p_parent_id: remark.id }), /Remark not found/);
+  await call('MEM', 'team_remark_add', { p_task_id: ids[0], p_body: 'Yes', p_parent_id: remark.id });
+  await call('MEM', 'team_remark_check', { p_task_id: ids[0], p_remark_id: remark.id });
+  const thread = await call('MEM', 'team_remarks', { p_task_id: ids[0] });
+  assert.ok(thread.find(r => r.id === remark.id).checked_at);
+  assert.equal(thread.find(r => r.parent_id === remark.id).body, 'Yes');
+  const checked = (await board()).tasks.find(t => t.id === ids[0]);
+  assert.equal(checked.urgent_remark, false);
+  assert.equal(checked.remark_count, 1);
+  assert.equal(checked.status, 'in_progress');
+});

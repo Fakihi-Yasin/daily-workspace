@@ -283,3 +283,24 @@ test('a blocked account stops syncing at once: nothing retried, the device keeps
   assert.equal(await b.pull(), 'denied', 'stopped: no more requests');
   assert.equal(a.ls.getItem(`dash.v2.u.${encodeURIComponent(ME)}.real.sync`), before, 'sync metadata untouched (no fake "cloud is empty")');
 });
+
+test('a rejected access token renews once and a temporary token error does not request login', async () => {
+  const { createRpc } = await import('../web/supabase-rpc.js');
+  const fresh = [];
+  const request = createRpc({
+    url: 'https://workspace.test', publishableKey: 'test',
+    getToken: async (opts) => { fresh.push(!!opts?.fresh); return opts?.fresh ? 'renewed' : 'expired'; },
+    fetchImpl: async (_url, opts) => opts.headers.Authorization === 'Bearer expired'
+      ? new Response(JSON.stringify({ code: 'PGRST303', message: 'JWT expired' }), { status: 401 })
+      : new Response(JSON.stringify({ status: 'ok' })),
+  });
+  assert.deepEqual(await request('my_access'), { status: 'ok' });
+  assert.deepEqual(fresh, [false, true]);
+
+  const unavailable = createRpc({
+    url: 'https://workspace.test', publishableKey: 'test',
+    getToken: async () => { throw new Error('Temporary network failure'); },
+    fetchImpl: async () => assert.fail('should not send a request without a token'),
+  });
+  await assert.rejects(unavailable('my_access'), e => !e.auth && /Temporary network failure/.test(e.message));
+});

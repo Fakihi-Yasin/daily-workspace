@@ -66,6 +66,7 @@ test('no email provider: the invitation is saved, the answer says clearly that n
     assert.equal(r.status, 200);
     assert.deepEqual([r.body.saved, r.body.emailed, r.body.sent, r.body.code], [true, false, undefined, 'email_not_configured']);
     assert.match(r.body.message, /no email was sent/);
+    assert.match(r.body.invite_url, /#\/invite\/[a-f0-9]{64}$/);
     assert.deepEqual(r.body.missing, ['RESEND_API_KEY', 'INVITE_FROM_EMAIL']);
   }
   assert.deepEqual(reg.body.message, unreg.body.message, 'nothing reveals which address has an account');
@@ -273,9 +274,9 @@ test('Super Admin deletes any team (not a member); others cannot; audited; nothi
   await call('MEM', 'save_snapshot', { p_slot: 'real', p_expected_rev: null, p_new_rev: 'mem-rev-1', p_snapshot: { format: 'dashboard-snapshot', version: 1, rev: 'mem-rev-1', tables: {} } });
   await call('OWN', 'team_task_create', { p_team_id: T2, p_title: 'Other team task' });
   await post('OWN', { team_id: T1, email: 'pending@example.test' });
-  // A member and an unrelated Admin can't delete it.
-  await refused(call('MEM', 'team_delete', { p_team_id: T1 }), /Only the team owner/);
-  await assert.rejects(call('OUT', 'team_delete', { p_team_id: T1 }), /Team not found/);
+  // Members, owners and unrelated Admins cannot delete teams.
+  await refused(call('MEM', 'team_delete', { p_team_id: T1 }), /super_admin_required/);
+  await refused(call('OUT', 'team_delete', { p_team_id: T1 }), /super_admin_required/);
   assert.equal((await call('SA', 'team_get', { p_team_id: T1 })).me.access, 'viewer');
   const r = await call('SA', 'team_delete', { p_team_id: T1 });
   assert.equal(r.deleted, T1);
@@ -298,8 +299,8 @@ test('Super Admin deletes any team (not a member); others cannot; audited; nothi
   assert.deepEqual([a.action, a.actor.id, a.target.id, a.target.name, a.target.team], ['team_delete', SA, T1, 'Launch crew', true]);
   assert.match(a.new, /task\(s\).*3 member\(s\); owner OSM BEN/);
   assert.ok(a.at);
-  // The owner's own permission is unchanged.
-  await call('OWN', 'team_delete', { p_team_id: T2 });
-  assert.equal((await call('SA', 'admin_audit', { p_limit: 1 }))[0].actor.id, OWN);
+  await refused(call('OWN', 'team_delete', { p_team_id: T2 }), /super_admin_required/);
+  await call('SA', 'team_delete', { p_team_id: T2 });
+  assert.equal((await call('SA', 'admin_audit', { p_limit: 1 }))[0].actor.id, SA);
   await assert.rejects(call('SA', 'team_delete', { p_team_id: T2 }), /Team not found/);
 });

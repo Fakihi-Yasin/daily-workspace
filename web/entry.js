@@ -56,17 +56,33 @@ async function start() {
   rememberInvite();
   let auth;
   try {
-    auth = await createAuth(cfg);
+    auth = await createAuth({ ...cfg, resume: !!window.localStorage.getItem(ACTIVE_USER_KEY) });
   } catch (e) {
     return signInScreen(null, 'Sign-in is unavailable: ' + (e.message || e));
   }
-  if (!auth.user) return signInScreen(auth, auth.error);
+  let redirecting = false;
+  const reauthenticate = async () => {
+    if (redirecting || navigator.onLine === false) return;
+    redirecting = true;
+    try { await auth.login(); }
+    catch { redirecting = false; }
+  };
+
+  if (!auth.user) {
+    signInScreen(auth, auth.error);
+    if (auth.sessionExpired) void reauthenticate();
+    return;
+  }
 
   // With Supabase, the database decides who may use the workspace: every active account (any role)
   // gets its own dashboard; a blocked account is refused.
   let rpc = null, access = null;
   if (cfg.supabase) {
-    rpc = createRpc({ url: cfg.supabase.url, publishableKey: cfg.supabase.publishableKey, getToken: auth.getToken });
+    const request = createRpc({ url: cfg.supabase.url, publishableKey: cfg.supabase.publishableKey, getToken: auth.getToken });
+    rpc = async (name, args) => {
+      try { return await request(name, args); }
+      catch (e) { if (e.auth) void reauthenticate(); throw e; }
+    };
     root.innerHTML = '<main class="signin"><p class="muted">Checking access…</p></main>';
     access = await checkAccess(rpc, auth);
     if (!access) return;
@@ -80,7 +96,7 @@ async function start() {
   let monitor = null;
   if (cfg.supabase) {
     root.innerHTML = '<main class="signin"><p class="muted">Loading your data…</p></main>';
-    sync = createSyncController(auth, local, rpc, () => monitor && monitor.check());
+    sync = createSyncController(auth, local, rpc, () => monitor && monitor.check(), () => redirecting);
     storage = sync.store;
     await storage.init();
     storage.start();
@@ -118,7 +134,7 @@ async function start() {
     profile: access && access.profile ? access.profile : null,
     // Re-read this account with a fresh sign-in token (e.g. after confirming the email address).
     refreshMe: rpc ? async () => {
-      await auth.getToken({ fresh: true });
+      try { await auth.getToken({ fresh: true }); } catch (e) { if (e.auth) void reauthenticate(); throw e; }
       const me = await rpc('register_me');
       window.__dash.profile = me.profile || window.__dash.profile;
       return me;
@@ -126,7 +142,7 @@ async function start() {
     // Team invites: /api/invite saves the invitation and emails it when a provider is set up (api/_invite.mjs).
     sendInvite: rpc ? async (teamId, email) => {
       let token;
-      try { token = await auth.getToken(); } catch (e) { throw Object.assign(new Error('Sign in again to send invites.'), { auth: true }); }
+      try { token = await auth.getToken({ fresh: true }); } catch (e) { if (e.auth) void reauthenticate(); throw e; }
       let res;
       try {
         res = await fetch('/api/invite', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ team_id: teamId, email }) });
@@ -155,7 +171,7 @@ async function start() {
   // Back from sign-in / sign-up / switching accounts with an invite still open: show it.
   let pending = null;
   try { pending = window.localStorage.getItem(PENDING_INVITE); } catch { /* none */ }
-  if (rpc && pending && !inviteInHash()) window.location.hash = '#/invite/' + pending;
+  if (rpc && pending && (!window.location.hash || inviteInHash())) window.location.hash = '#/invite/' + pending;
   root.innerHTML = ''; // remove the full-height "Loading…" placeholder, or it stays under the dashboard as empty scroll space
   mount(root);
 
@@ -192,7 +208,7 @@ async function checkAccess(rpc, auth) {
       try { cached = JSON.parse(window.localStorage.getItem(accessKey(auth))); } catch { /* none */ }
       if (cached) return { ...cached, offline: true };
     }
-    if (e.auth) { signInScreen(auth, 'Your session expired. Sign in again.'); return null; }
+    if (e.auth) { signInScreen(auth); return null; }
     gateScreen(auth, { error: e.offline ? 'You are offline, and this browser has never checked your access. Connect and try again.' : 'Could not check your access: ' + (e.message || e) });
     return null;
   }
@@ -205,7 +221,7 @@ function startAccessMonitor(rpc, auth, access, revoke) {
     running = true;
     try {
       const a = await rpc('my_access');
-      window.localStorage.setItem(accessKey(auth), JSON.stringify({ role: a.role, status: a.status }));
+      window.localStorage.setItem(accessKey(auth), JSON.stringify({ role: a.role, status: a.status, features: a.features || [] }));
       if (!hasWorkspace(a)) { done = true; clearInterval(timer); revoke(a); }
       else if (a.role !== access.role) { done = true; window.location.reload(); } // role changed: rebuild the sidebar
     } catch { /* offline or a transient error: the next check retries */ }
@@ -245,7 +261,7 @@ function gateScreen(auth, a) {
 }
 
 // Cloud sync (Supabase) wiring: status for the UI, retries on reconnect/focus, conflict actions.
-function createSyncController(auth, local, rpc, onDenied) {
+function createSyncController(auth, local, rpc, onDenied, isRedirecting) {
   const listeners = new Set();
   let last = { state: 'idle' };
   const remote = createSupabaseRemote({ rpc });
@@ -258,7 +274,7 @@ function createSyncController(auth, local, rpc, onDenied) {
   window.addEventListener('online', () => { store.push().then(() => store.pull()); });
   window.addEventListener('focus', () => { store.pull(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') store.push(); });
-  window.addEventListener('beforeunload', (e) => { if (store.status().pending) { store.push(); e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('beforeunload', (e) => { if (store.status().pending && !isRedirecting()) { store.push(); e.preventDefault(); e.returnValue = ''; } });
   return {
     store,
     api: {

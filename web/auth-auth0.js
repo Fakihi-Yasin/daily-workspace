@@ -5,7 +5,10 @@ import { createAuth0Client } from '@auth0/auth0-spa-js';
 
 // With cloud sync, `audience` is the Auth0 API whose access tokens Supabase accepts (Third-Party Auth);
 // the user id stays the same Auth0 `sub`, so existing accounts keep their identity.
-export async function createAuth({ domain, clientId, audience }) {
+const interactionErrors = new Set(['login_required', 'interaction_required', 'consent_required',
+  'missing_refresh_token', 'invalid_grant', 'invalid_refresh_token']);
+
+export async function createAuth({ domain, clientId, audience, resume }) {
   const client = await createAuth0Client({
     domain,
     clientId,
@@ -32,24 +35,29 @@ export async function createAuth({ domain, clientId, audience }) {
     window.history.replaceState({}, '', '/');
   }
 
-  const authed = await client.isAuthenticated();
-  const u = authed ? await client.getUser() : null;
+  const getToken = async ({ fresh = false } = {}) => {
+    try {
+      return await client.getTokenSilently({ ...(audience ? { authorizationParams: { audience } } : {}), ...(fresh ? { cacheMode: 'off' } : {}) });
+    } catch (e) {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) throw Object.assign(new Error('Offline'), { offline: true });
+      throw Object.assign(new Error(e.error_description || e.message || 'Sign-in unavailable'), { auth: interactionErrors.has(e.error) });
+    }
+  };
+
+  let user = await client.getUser();
+  let sessionExpired = false;
+  if (!user && resume && !error && navigator.onLine !== false) {
+    try { await getToken(); user = await client.getUser(); }
+    catch (e) { sessionExpired = !!e.auth; }
+  }
   return {
     provider: 'auth0',
     error,
-    // picture: only a Google sign-in's photo is offered as a profile photo (the user chooses it).
-    user: u && u.sub ? { id: u.sub, email: u.email || '', name: u.name || u.email || '', picture: u.sub.startsWith('google-oauth2|') && typeof u.picture === 'string' ? u.picture : '' } : null,
+    sessionExpired,
+    // Offer Google’s photo as an option. Profile settings control whether teammates see it.
+    user: user && user.sub ? { id: user.sub, email: user.email || '', name: user.name || user.email || '', picture: user.sub.startsWith('google-oauth2|') && typeof user.picture === 'string' ? user.picture : '' } : null,
     login: (opts = {}) => client.loginWithRedirect({ appState: { hash: window.location.hash }, ...(opts.signup ? { authorizationParams: { screen_hint: 'signup' } } : {}) }),
-    // Access token for the sync API. Errors (expired session, missing consent…) are tagged `auth`.
-    // { fresh: true } skips the cached token, so claims such as email_verified are re-read.
-    getToken: async ({ fresh = false } = {}) => {
-      try {
-        return await client.getTokenSilently({ ...(audience ? { authorizationParams: { audience } } : {}), ...(fresh ? { cacheMode: 'off' } : {}) });
-      } catch (e) {
-        if (typeof navigator !== 'undefined' && navigator.onLine === false) throw Object.assign(new Error('Offline'), { offline: true });
-        throw Object.assign(new Error(e.error_description || e.message || 'Sign-in expired'), { auth: true });
-      }
-    },
+    getToken,
     logout: () => client.logout({ logoutParams: { returnTo: window.location.origin + '/' } }),
   };
 }

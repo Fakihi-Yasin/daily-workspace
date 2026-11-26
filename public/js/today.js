@@ -1,5 +1,5 @@
 // "Today": the routine checklist first, with a compact focus panel and a right column (score, next action, sessions).
-import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, Modal, AutoGrow, TaskText, firstLine, fmtDay, fmtShort, addDays, fmtDur, pct } from './lib.js';
+import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, Modal, AutoGrow, TaskText, firstLine, fmtDay, fmtShort, addDays, fmtDur, pct , useFiveRows } from './lib.js';
 import { PcTimeCard } from './pctime.js';
 import { FocusPanel, requestStart } from './focus.js';
 import { CompletedModal } from './history.js';
@@ -201,7 +201,8 @@ function MyTasks({ ctx }) {
   const [title, setTitle] = useState('');
   const [cat, setCat] = useState('');
   const [showCancelled, setShowCancelled] = useState(false);
-  const overdue = ctx.todos.filter(t => ctx.overdueIds.has(t.id));
+  const overdue = ctx.todos.filter(t => ctx.overdueIds.has(t.id)).sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  const overdueList = useFiveRows();
   const rest = ctx.todos.filter(t => !ctx.overdueIds.has(t.id));
   const done = ctx.todos.filter(t => t.done_for_day).length;
   // One entry = ONE task: new lines and bullets are formatting inside its title.
@@ -231,7 +232,7 @@ function MyTasks({ ctx }) {
     </form>
     ${overdue.length > 0 && html`<div class="overdue-block" role="region" aria-label=${'Overdue, ' + overdue.length + ' task' + (overdue.length === 1 ? '' : 's')}>
       <div class="overdue-head"><${Icon} name="alert" size=${15} /><span>Overdue</span><span class="overdue-count">${overdue.length}</span></div>
-      <div class="task-list">${overdue.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>
+      <div class="task-list five-row-list" ref=${overdueList} tabindex="0" aria-label="Overdue tasks">${overdue.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>
     </div>`}
     ${rest.length > 0 && html`<div class="task-list">${rest.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>`}
     ${ctx.cancelled.length > 0 && html`<div class="cancelled-group">

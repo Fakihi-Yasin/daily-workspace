@@ -405,3 +405,23 @@ export function Avatar({ p, size = 32, src }) {
     ? html`<img class="avatar" src=${img} alt="" width=${size} height=${size} style=${style} referrerpolicy="no-referrer" />`
     : html`<span class=${'avatar initials c' + avatarColor(p && p.id)} style=${style} aria-hidden="true">${initials(label)}</span>`;
 }
+
+// Keep the first five rows fully visible and the rest reachable in the same list.
+export function useFiveRows() {
+  const ref = useRef(null);
+  useEffect(() => {
+    const list = ref.current;
+    if (!list) return;
+    const rows = Array.from(list.children).slice(0, 5);
+    function measure() {
+      if (rows.length < 5 || list.children.length <= 5) { list.style.removeProperty('--five-rows'); return; }
+      const height = rows[4].getBoundingClientRect().bottom - rows[0].getBoundingClientRect().top;
+      list.style.setProperty('--five-rows', Math.ceil(height) + 'px');
+    }
+    measure();
+    const observer = new ResizeObserver(measure);
+    rows.forEach(row => observer.observe(row));
+    return () => observer.disconnect();
+  });
+  return ref;
+}

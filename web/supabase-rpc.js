@@ -8,10 +8,10 @@
 //   status, code                    HTTP status and Postgres error code
 export function createRpc({ url, publishableKey, getToken, fetchImpl = globalThis.fetch.bind(globalThis) }) {
   const base = url.replace(/\/+$/, '') + '/rest/v1/rpc/';
-  return async function rpc(name, args = {}) {
+  async function request(name, args, fresh) {
     let token;
-    try { token = await getToken(); }
-    catch (e) { throw Object.assign(new Error(e.message || 'Sign-in expired'), { auth: !e.offline, offline: !!e.offline }); }
+    try { token = await getToken(fresh ? { fresh: true } : undefined); }
+    catch (e) { throw Object.assign(new Error(e.message || 'Sign-in expired'), { auth: !!e.auth, offline: !!e.offline }); }
     let res;
     try {
       res = await fetchImpl(base + name, {
@@ -33,9 +33,18 @@ export function createRpc({ url, publishableKey, getToken, fetchImpl = globalThi
         : raw;
       throw Object.assign(new Error(msg), {
         status: res.status, code: body && body.code, denied,
-        auth: res.status === 401 || /jwt|token/i.test(raw),
+        auth: res.status === 401 && (['PGRST301', 'PGRST302', 'PGRST303'].includes(body && body.code)
+          || /^(?:jwt expired|invalid jwt|jwt malformed|invalid token)(?:\b|$)/i.test(raw)),
       });
     }
     return body;
+  }
+  return async function rpc(name, args = {}) {
+    try {
+      return await request(name, args, false);
+    } catch (e) {
+      if (e.status !== 401 || !e.auth) throw e;
+    }
+    return request(name, args, true);
   };
 }
