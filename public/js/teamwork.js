@@ -2,7 +2,7 @@
 // Data lives in the shared Supabase tables (never in personal snapshots) and every read and write
 // goes through database functions that check role, blocked status and team membership. The
 // permission checks below only decide which buttons to show.
-import { html, useState, useEffect, useRef, useCallback, useResource, Icon, Chip, Modal, Empty, TaskText, toast, fmtDay, fmtShort, addDays, pct, bus } from './lib.js';
+import { html, useState, useEffect, useRef, useCallback, useResource, Icon, Chip, Modal, Empty, TaskText, toast, fmtDay, fmtShort, addDays, pct, bus, Avatar, ActionsMenu } from './lib.js';
 
 export const rpc = (name, args) => window.__dash.rpc(name, args);
 
@@ -43,6 +43,47 @@ export async function change(name, args, okMsg) {
   }
 }
 
+// ---------- unread team tasks (sidebar badge and team cards) ----------
+// Tasks someone else created in my teams since I last opened that team's board. The database keeps
+// "last seen" per user and per team (team_unread / team_mark_seen), so it survives reloads and
+// works across devices. Loaded with the dashboard, refreshed every 20 s, on focus and after changes.
+const unread = { data: null, subs: new Set(), started: false, busy: false };
+export async function refreshUnread() {
+  if (!window.__dash || !window.__dash.rpc || unread.busy) return;
+  unread.busy = true;
+  try { unread.data = await rpc('team_unread', {}); unread.subs.forEach(f => f(unread.data)); }
+  catch { /* offline or signed out: keep the last count */ }
+  finally { unread.busy = false; }
+}
+function startUnread() {
+  if (unread.started) return;
+  unread.started = true;
+  refreshUnread();
+  setInterval(() => { if (document.visibilityState === 'visible') refreshUnread(); }, 20000);
+  bus.on(refreshUnread);
+}
+export function useUnread() {
+  const [d, set] = useState(unread.data);
+  useEffect(() => { unread.subs.add(set); startUnread(); if (unread.data !== d) set(unread.data); return () => unread.subs.delete(set); }, []);
+  return d;
+}
+export const unreadLabel = (n) => (n > 99 ? '+99' : '+' + n);
+export function UnreadNavBadge() {
+  const d = useUnread();
+  const n = d ? d.total : 0;
+  if (!n) return null;
+  return html`<span class="nav-badge" title=${n + ' new team task' + (n === 1 ? '' : 's')} aria-label=${n + ' new team task' + (n === 1 ? '' : 's')}>${unreadLabel(n)}</span>`;
+}
+async function markSeen(teamId, upto) {
+  try { await rpc('team_mark_seen', { p_team_id: teamId, p_upto: upto || null }); } catch { return; }
+  if (unread.data && unread.data.teams[teamId]) {
+    const teams = { ...unread.data.teams }; const n = teams[teamId]; delete teams[teamId];
+    unread.data = { total: Math.max(0, unread.data.total - n), teams };
+    unread.subs.forEach(f => f(unread.data));
+  }
+  refreshUnread();
+}
+
 export const STATUSES = [['todo', 'To do', 'ink'], ['in_progress', 'In progress', 'blue'], ['blocked', 'Blocked', 'pink'], ['done', 'Done', 'mint']];
 const statusLabel = (s) => (STATUSES.find(x => x[0] === s) || [s, s])[1];
 const fmtWhen = (iso) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -69,6 +110,8 @@ export function TeamWork({ sub }) {
 function TeamLanding() {
   const [scope, setScope] = useState('mine');
   const { data, error } = useRpc('team_list', { p_scope: scope });
+  const counts = useUnread();
+  const [deleting, setDeleting] = useState(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   // Members are added afterwards, from the team's People tab (Add member).
@@ -96,8 +139,9 @@ function TeamLanding() {
       ${error ? html`<p class="notice" role="alert">${error}</p>`
         : !data ? html`<p class="muted">Loading…</p>`
         : data.length === 0 ? html`<${Empty} title=${scope === 'all' ? 'No teams in the app yet' : 'You’re not in a team yet'}>${scope !== 'mine' ? '' : canCreateTeams() ? 'Create one above, then add people by the email they signed up with.' : 'When a team owner adds you by your email, the team shows up here.'}<//>`
-        : html`<div class="cards team-cards">${data.map(t => html`<a class="card team-card" href=${'#/teams/' + t.id} key=${t.id}>
+        : html`<div class="cards team-cards">${data.map(t => { const n = (counts && counts.teams[t.id]) || 0; return html`<div class="team-card-wrap" key=${t.id}><a class="card team-card" href=${'#/teams/' + t.id}>
             <div class="row"><strong class="team-name">${t.name}</strong><span class="spacer"></span>
+              ${n > 0 && html`<span class="team-badge" title=${n + ' new task' + (n === 1 ? '' : 's') + ' since you last opened the board'}>${unreadLabel(n)}</span>`}
               ${t.my_role ? html`<${Chip} color=${t.my_role === 'owner' ? 'solid' : 'ink'}>${t.my_role === 'owner' ? 'Owner' : 'Member'}<//>` : html`<${Chip} color="yellow">Viewing<//>`}</div>
             <span class="small muted">Owner: ${t.owner.name} · ${t.members} member${t.members === 1 ? '' : 's'}</span>
             <div class="row wrap small">
@@ -105,8 +149,11 @@ function TeamLanding() {
               ${t.blocked > 0 && html`<${Chip} color="pink">${t.blocked} blocked<//>`}
               <span class="muted">${t.done} done</span>
             </div>
-          </a>`)}</div>`}
+          </a>
+          ${isSuper() && html`<div class="team-card-menu"><${ActionsMenu} compact label=${t.name} items=${[['Delete team…', () => setDeleting(t), 'danger']]} /></div>`}
+          </div>`; })}</div>`}
     </section>
+    ${deleting && html`<${DeleteTeamModal} team=${deleting} onClose=${() => setDeleting(null)} />`}
   </div>`;
 }
 
@@ -118,6 +165,18 @@ function TeamPage({ id }) {
   const { data: boot } = useResource('/api/bootstrap');
   // "#/teams/<id>?tab=people" opens a tab directly (used right after creating a team).
   const [tab, setTab] = useState(() => { const t = (/[?&]tab=(\w+)/.exec(location.hash) || [])[1]; return TABS.some(x => x[0] === t) ? t : 'board'; });
+  // Opening the board (once its tasks have loaded) clears this team's unread count, and only this one.
+  const counts = useUnread();
+  const unreadHere = (counts && counts.teams[id]) || 0;
+  const seenFor = useRef(null);
+  const loadedAt = data && data.loaded_at;
+  const isMember = !!data && (data.me.access === 'owner' || data.me.access === 'member');
+  useEffect(() => {
+    if (tab !== 'board' || !loadedAt || !isMember) return;
+    if (seenFor.current === loadedAt && !unreadHere) return;
+    seenFor.current = loadedAt;
+    markSeen(id, loadedAt);
+  }, [tab, loadedAt, unreadHere, isMember]);
   if (error) return html`<div><p><a href="#/teams" class="link-btn">← Team Work</a></p>
     <${Empty} title=${/not found/i.test(error) ? 'Team not found' : 'Can’t open this team'}>${/not found/i.test(error) ? 'It was deleted, or you’re not a member of it.' : error}<//></div>`;
   if (!data || !boot) return html`<p class="muted">Loading…</p>`;
@@ -132,7 +191,7 @@ function TeamPage({ id }) {
       <h1>${data.team.name}</h1>
       ${me.access === 'owner' ? html`<${Chip} color="solid">Owner<//>` : me.access === 'member' ? html`<${Chip}>Member<//>` : html`<${Chip} color="yellow">Viewing as Super Admin (read-only)<//>`}
       <span class="spacer"></span>
-      ${ctx.owner && html`<${TeamMenu} team=${data.team} />`}
+      ${(ctx.owner || isSuper()) && html`<${TeamMenu} team=${data.team} owner=${ctx.owner} counts=${{ tasks: t.length, members: data.members.length, projects: data.projects.filter(p => !p.moved_at).length }} />`}
     </header>
     <div class="tiles team-summary">
       <div class="tile"><span class="v">${t.filter(k => k.status === 'todo').length}</span><span class="k">To do</span></div>
@@ -151,16 +210,14 @@ function TeamPage({ id }) {
   </div>`;
 }
 
-function TeamMenu({ team }) {
+function TeamMenu({ team, owner, counts }) {
   const [renaming, setRenaming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [name, setName] = useState(team.name);
-  const del = async () => {
-    if (!confirm(`Delete the team “${team.name}” with all its tasks and future projects? This can’t be undone.`)) return;
-    try { await change('team_delete', { p_team_id: team.id }, 'Team deleted'); location.hash = '#/teams'; } catch { /* toast shown */ }
-  };
   return html`<div class="row">
-    <button class="btn sm" onClick=${() => setRenaming(true)}><${Icon} name="edit" size=${14} />Rename</button>
-    <button class="btn sm danger" onClick=${del}>Delete team</button>
+    ${owner && html`<button class="btn sm" onClick=${() => setRenaming(true)}><${Icon} name="edit" size=${14} />Rename</button>`}
+    <button class="btn sm danger" onClick=${() => setDeleting(true)}>Delete team</button>
+    ${deleting && html`<${DeleteTeamModal} team=${{ id: team.id, name: team.name, owner: team.owner, ...counts }} onClose=${() => setDeleting(false)} onDeleted=${() => { location.hash = '#/teams'; }} />`}
     ${renaming && html`<${Modal} title="Rename team" onClose=${() => setRenaming(false)}>
       <form class="stack" onSubmit=${async (e) => { e.preventDefault(); try { await change('team_rename', { p_team_id: team.id, p_name: name }, 'Renamed'); setRenaming(false); } catch { /* toast */ } }}>
         <label class="field">Name<input type="text" maxlength="80" value=${name} onInput=${(e) => setName(e.target.value)} required /></label>
@@ -268,8 +325,84 @@ function TaskModal({ ctx, task, onClose }) {
   <//>`;
 }
 
-// Add a member: search the accounts that aren't in the team yet and pick one (team owner only;
-// the database refuses everyone else and never lists blocked accounts).
+// Add a member by invite: the owner types the full email; the server emails a one-time link.
+// The answer is the same whether or not that email has an account (no directory, no lookup).
+// "Invite sent" only appears once the email provider accepted the message.
+function InviteMember({ teamId }) {
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState(null);
+  const { data: invites, reload } = useRpc('team_invite_list', { p_team_id: teamId }, { poll: 0 });
+  const valid = /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email.trim());
+  const send = async (e) => {
+    e.preventDefault();
+    if (!valid) return;
+    setBusy(true); setProblem(null);
+    try {
+      await window.__dash.sendInvite(teamId, email.trim());
+      toast({ msg: 'Invite sent' });
+      setEmail('');
+      reload();
+    } catch (err) {
+      setProblem(err.code === 'email_not_configured' ? 'Invites can’t be emailed yet: no email provider is set up for this app. Nothing was sent. Ask the person who runs this workspace to set one up.' : err.message);
+    } finally { setBusy(false); }
+  };
+  const revoke = async (i) => {
+    if (!confirm(`Cancel the invite to ${i.email}? The link stops working.`)) return;
+    try { await change('team_invite_revoke', { p_invite_id: i.id }, 'Invite cancelled'); reload(); } catch { /* toast shown */ }
+  };
+  return html`<section class="card flat add-member" aria-labelledby="invite-h">
+    <h4 id="invite-h">Add member</h4>
+    <form class="invite-form" onSubmit=${send}>
+      <label class="sr-only" for="invite-email">Email address</label>
+      <input id="invite-email" type="email" inputmode="email" autocomplete="off" spellcheck="false" maxlength="254" placeholder="Their full email, e.g. name@example.com"
+        value=${email} onInput=${(e) => { setEmail(e.target.value); setProblem(null); }} />
+      <button class="btn primary" disabled=${busy || !valid}><${Icon} name="plus" size=${16} />${busy ? 'Sending…' : 'Send invite'}</button>
+    </form>
+    ${problem && html`<p class="notice" role="alert">${problem}</p>`}
+    <p class="hint">They get an email with a link that works once, for 7 days. They sign in or create an account with that email, confirm it, and join this team only. Their role doesn’t change.</p>
+    ${invites && invites.length > 0 && html`<div><p class="small muted" style="margin:4px 0 6px">Waiting for an answer</p>
+      <ul class="invite-list">${invites.map(i => html`<li key=${i.id}><span class="em">${i.email}</span>
+        <span class="small muted">sent ${fmtWhen(i.sent_at)} · expires ${fmtWhen(i.expires_at)}</span><span class="spacer"></span>
+        <button class="btn sm" onClick=${() => revoke(i)}>Cancel invite</button></li>`)}</ul></div>`}
+  </section>`;
+}
+
+// Deleting a team: the owner, or any Super Admin (the database checks it and writes the audit log).
+export function DeleteTeamModal({ team, onClose, onDeleted }) {
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const ok = typed.trim().toLowerCase() === team.name.trim().toLowerCase();
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const del = async (e) => {
+    e.preventDefault();
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await change('team_delete', { p_team_id: team.id }, `Team “${team.name}” deleted`);
+      refreshUnread();
+      onClose();
+      if (onDeleted) onDeleted();
+    } catch { setBusy(false); }
+  };
+  return html`<${Modal} title="Delete this team?" onClose=${onClose}>
+    <form class="stack" onSubmit=${del}>
+      <p class="confirm-name">“${team.name}”${team.owner ? html` <span class="muted small" style="font-weight:400">· owner ${team.owner.name}</span>` : ''}</p>
+      <ul class="small" style="margin:0;padding-left:18px">
+        <li>Its ${team.tasks != null ? plural(team.tasks, 'task') : 'tasks'}${team.projects != null ? `, ${plural(team.projects, 'future project')}` : ', future projects'}, daily scores and activity are deleted for good.</li>
+        <li>${team.members != null ? plural(team.members, 'member') : 'Its members'} lose access to it at once; it disappears from their dashboards. Pending invites stop working.</li>
+        <li>Their accounts, personal dashboards and personal tasks, and every other team, are not touched.</li>
+      </ul>
+      <p class="small muted">This can’t be undone. The deletion is recorded in the audit log with your name and the time.</p>
+      <label class="field">Type the team name to confirm<input type="text" autocomplete="off" value=${typed} onInput=${(e) => setTyped(e.target.value)} aria-label="Type the team name to confirm" /></label>
+      <div class="row"><span class="spacer"></span>
+        <button type="button" class="btn" onClick=${onClose}>Cancel</button>
+        <button class="btn danger-solid" disabled=${!ok || busy}>${busy ? 'Deleting…' : 'Delete team'}</button></div>
+    </form>
+  <//>`;
+}
+
+// Super Admin only (the database refuses everyone else): pick an existing account directly.
 function MemberPicker({ teamId }) {
   const { data, error } = useRpc('team_member_candidates', { p_team_id: teamId }, { poll: 0 });
   const [q, setQ] = useState('');
@@ -285,7 +418,7 @@ function MemberPicker({ teamId }) {
     catch { /* toast shown */ } finally { setBusy(null); }
   };
   return html`<section class="card flat add-member" aria-labelledby="add-member-h">
-    <div class="row"><h4 id="add-member-h">Add a member</h4><span class="spacer"></span>
+    <div class="row"><h4 id="add-member-h">Add an existing account <span class="muted small">(Super Admin)</span></h4><span class="spacer"></span>
       ${data && html`<span class="small muted" aria-live="polite">${needle ? `${rows.length} match${rows.length === 1 ? '' : 'es'} · ` : ''}${data.length} account${data.length === 1 ? '' : 's'} not in this team</span>`}</div>
     <label class="search add-member-search"><${Icon} name="search" size=${16} />
       <input type="search" inputmode="email" autocomplete="off" placeholder="Search by email" aria-label="Search accounts by email" value=${q} onInput=${(e) => setQ(e.target.value)} /></label>
@@ -293,7 +426,7 @@ function MemberPicker({ teamId }) {
       : !data ? html`<p class="small muted">Loading accounts…</p>`
       : rows.length === 0 ? html`<p class="small muted">${data.length === 0 ? 'Everyone with an active account is already in this team.' : 'No email matches “' + q.trim() + '”.'}</p>`
       : html`<ul class="member-list member-list-4" role="list" aria-label="Accounts" tabindex="0">${rows.map(u => html`<li key=${u.id}>
-          <span class="pick-avatar" aria-hidden="true">${label(u).slice(0, 1).toUpperCase()}</span>
+          <${Avatar} p=${u} size=${32} />
           <span class="pick-id"><strong>${u.email || html`<span class="muted">no email on file</span>`}</strong>
             <span class="small muted">${u.name || ''}${u.email && !u.email_verified ? html`${u.name ? ' · ' : ''}<span title="This email hasn't been confirmed">unconfirmed</span>` : ''}</span></span>
           <button class="btn sm primary" disabled=${busy === u.id} onClick=${() => add(u)} aria-label=${'Add ' + label(u)}><${Icon} name="plus" size=${14} />Add</button>
@@ -310,13 +443,14 @@ function People({ ctx }) {
     try { await change('team_remove_member', { p_team_id: teamId, p_user_id: m.id }, 'Removed'); } catch { /* toast shown */ }
   };
   return html`<div>
-    ${ctx.owner && html`<${MemberPicker} teamId=${teamId} />`}
+    ${ctx.owner && html`<${InviteMember} teamId=${teamId} />`}
+    ${ctx.owner && isSuper() && html`<${MemberPicker} teamId=${teamId} />`}
     <div class="cards">
       ${ctx.team.members.map(m => {
         const mine = ctx.team.tasks.filter(k => k.assignee && k.assignee.id === m.id);
         const by = (s) => mine.filter(k => k.status === s);
         return html`<div class="card flat person" key=${m.id}>
-          <div class="row"><div class="person-id"><strong>${m.name}${m.id === ctx.me.id ? ' (you)' : ''}</strong><span class="small muted">${m.email || 'no email'}</span></div>
+          <div class="row"><div class="person-head"><${Avatar} p=${m} size=${40} /><div class="person-id"><strong>${m.name}${m.id === ctx.me.id ? ' (you)' : ''}</strong><span class="small muted">${m.email || 'no email'}</span></div></div>
             <span class="spacer"></span>${m.owner ? html`<${Chip} color="solid">Owner<//>` : ctx.owner && html`<button class="btn sm danger" onClick=${() => remove(m)}>Remove</button>`}</div>
           <div class="row wrap small" style="margin-top:8px">
             <${Chip}>${by('todo').length} to do<//><${Chip} color="blue">${by('in_progress').length} in progress<//>
@@ -413,6 +547,7 @@ function StartModal({ p, ctx, onClose }) {
 // ---------- activity ----------
 const EVENT_TEXT = {
   team_created: 'created the team', team_renamed: 'renamed the team to', member_added: 'added', member_removed: 'removed',
+  member_invited: 'sent an invite to', invite_accepted: 'joined by invite:',
   task_created: 'added the task', task_status: 'changed a status →', task_assigned: 'assigned', task_edited: 'edited', task_deleted: 'deleted the task',
   project_added: 'planned', project_started: 'moved to active work:',
 };
@@ -423,4 +558,54 @@ function Activity({ ctx }) {
     <span class="muted small">${fmtWhen(e.at)}</span>
     <span><strong>${e.actor.name}</strong> ${EVENT_TEXT[e.action] || e.action} ${e.action === 'task_status' ? html`<em>${statusLabel((e.detail || '').split(':')[0])}</em>: ${(e.detail || '').split(': ').slice(1).join(': ')}` : e.detail}</span>
   </li>`)}</ul>`;
+}
+
+// ---------- accepting an invite (#/invite/<token>) ----------
+export function InvitePage({ sub }) {
+  const token = sub;
+  const [state, setState] = useState({ data: null, error: null });
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try { setState({ data: await rpc('team_invite_peek', { p_token: token }), error: null }); }
+    catch (e) { setState({ data: null, error: e.message }); }
+  };
+  useEffect(() => { load(); }, [token]);
+  const done = () => { window.__dash.clearPendingInvite(); };
+  const accept = async () => {
+    setBusy(true);
+    try {
+      const r = await rpc('team_invite_accept', { p_token: token });
+      done(); bus.emit(false); refreshUnread();
+      toast({ msg: `You joined “${state.data.team_name}”` });
+      location.hash = '#/teams/' + r.team_id;
+    } catch (e) { toast({ msg: e.message, kind: 'error' }); setBusy(false); load(); }
+  };
+  const recheck = async () => {
+    setBusy(true);
+    try { await window.__dash.refreshMe(); await load(); } catch (e) { toast({ msg: e.message, kind: 'error' }); } finally { setBusy(false); }
+  };
+  const switchAccount = () => window.__dash.logout(); // the invite is kept for the next sign-in
+  const d = state.data;
+  const head = html`<header class="page-head"><h1>Team invite</h1></header>`;
+  if (state.error) return html`<div>${head}<p class="notice" role="alert">${state.error}</p></div>`;
+  if (!d) return html`<div>${head}<p class="muted">Loading…</p></div>`;
+  if (d.state !== 'ok') {
+    const why = { invalid: 'This invite link isn’t valid. Check that you copied the whole link.', used: 'This invite was already used.', revoked: 'This invite was cancelled.', expired: 'This invite has expired.' }[d.state];
+    return html`<div>${head}<div class="card invite-card stack">
+      <p><strong>${why}</strong>${d.team_name ? ` (team “${d.team_name}”)` : ''}</p>
+      ${d.state !== 'used' && html`<p class="muted">Ask the team owner to send you a new invite.</p>`}
+      <div class="row"><a class="btn" href="#/teams" onClick=${done}>Go to Team Work</a></div></div></div>`;
+  }
+  return html`<div>${head}<div class="card invite-card stack">
+    <p><strong>${d.inviter_name}</strong> invited you to join the team <strong>“${d.team_name}”</strong>.</p>
+    <p class="small muted">The invite is for ${d.invited_email} and works once, until ${fmtWhen(d.expires_at)}. Joining gives you this team only; your role and your own dashboard don’t change.</p>
+    ${d.already_member ? html`<p class="notice blue">You’re already a member of this team.</p>
+        <div class="row"><a class="btn primary" href=${'#/teams/' + d.team_id} onClick=${done}>Open the team</a></div>`
+      : !d.email_matches ? html`<p class="notice" role="alert">You’re signed in as <strong>${d.my_email || 'an account without an email'}</strong>, but this invite is for ${d.invited_email}. Sign out, then sign in or create an account with that email.</p>
+        <div class="row"><button class="btn primary" onClick=${switchAccount}>Sign out and switch account</button></div>`
+      : !d.my_email_verified ? html`<p class="notice" role="alert">Confirm your email address first: open the confirmation email we sent to <strong>${d.my_email}</strong> when you signed up and click its link. Then come back here.</p>
+        <div class="row"><button class="btn primary" disabled=${busy} onClick=${recheck}>${busy ? 'Checking…' : 'I’ve confirmed it — check again'}</button></div>`
+      : html`<div class="row"><button class="btn primary" disabled=${busy} onClick=${accept}>${busy ? 'Joining…' : 'Join “' + d.team_name + '”'}</button>
+          <a class="btn" href="#/teams" onClick=${done}>Not now</a></div>`}
+  </div></div>`;
 }

@@ -2,6 +2,9 @@
 // Serves a built folder (dist/ or dist-test/) locally, the way Vercel serves static files.
 //   npm run preview            → http://localhost:4322 (dist/)
 //   node scripts/preview.js dist-test 4323
+// POST /api/invite runs the same handler as the Vercel Function (api/_invite.mjs). For local tests,
+// INVITE_TEST_OUTBOX=<file> writes the emails to that file instead of sending them, and
+// APP_URL / SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY point at the local servers.
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -14,6 +17,17 @@ if (!fs.existsSync(path.join(dir, 'index.html'))) { console.error(`No build in $
 
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (url.pathname === '/api/invite') {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 10000) req.destroy(); });
+    req.on('end', async () => {
+      const { handleInvite } = await import('../api/_invite.mjs');
+      const r = await handleInvite({ method: req.method, headers: req.headers, body }, process.env);
+      res.writeHead(r.status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(r.body));
+    });
+    return;
+  }
   let file = path.join(dir, path.normalize(decodeURIComponent(url.pathname)));
   if (!file.startsWith(dir)) { res.writeHead(403); return res.end(); }
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(dir, 'index.html');

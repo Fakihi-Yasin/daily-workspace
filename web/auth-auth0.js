@@ -37,12 +37,14 @@ export async function createAuth({ domain, clientId, audience }) {
   return {
     provider: 'auth0',
     error,
-    user: u && u.sub ? { id: u.sub, email: u.email || '', name: u.name || u.email || '' } : null,
-    login: () => client.loginWithRedirect({ appState: { hash: window.location.hash } }),
+    // picture: only a Google sign-in's photo is offered as a profile photo (the user chooses it).
+    user: u && u.sub ? { id: u.sub, email: u.email || '', name: u.name || u.email || '', picture: u.sub.startsWith('google-oauth2|') && typeof u.picture === 'string' ? u.picture : '' } : null,
+    login: (opts = {}) => client.loginWithRedirect({ appState: { hash: window.location.hash }, ...(opts.signup ? { authorizationParams: { screen_hint: 'signup' } } : {}) }),
     // Access token for the sync API. Errors (expired session, missing consent…) are tagged `auth`.
-    getToken: async () => {
+    // { fresh: true } skips the cached token, so claims such as email_verified are re-read.
+    getToken: async ({ fresh = false } = {}) => {
       try {
-        return await client.getTokenSilently(audience ? { authorizationParams: { audience } } : undefined);
+        return await client.getTokenSilently({ ...(audience ? { authorizationParams: { audience } } : {}), ...(fresh ? { cacheMode: 'off' } : {}) });
       } catch (e) {
         if (typeof navigator !== 'undefined' && navigator.onLine === false) throw Object.assign(new Error('Offline'), { offline: true });
         throw Object.assign(new Error(e.error_description || e.message || 'Sign-in expired'), { auth: true });

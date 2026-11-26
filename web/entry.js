@@ -13,6 +13,14 @@ import { downloadJson, bus } from '../public/js/lib.js';
 const cfg = window.__DASH_CONFIG || {};
 const root = document.getElementById('app');
 
+// An invite link (#/invite/<token>) survives sign-in, sign-up and signing out to switch accounts.
+const PENDING_INVITE = 'dash.pendingInvite';
+const inviteInHash = () => (/^#\/invite\/([A-Za-z0-9_-]{20,200})$/.exec(window.location.hash) || [])[1];
+function rememberInvite() {
+  const t = inviteInHash();
+  try { if (t) window.localStorage.setItem(PENDING_INVITE, t); return t || window.localStorage.getItem(PENDING_INVITE); } catch { return t; }
+}
+
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function signInScreen(auth, error) {
@@ -22,17 +30,21 @@ function signInScreen(auth, error) {
       <div class="signin-card card">
         <div class="brand signin-brand"><i>✓</i><span>Dashboard</span></div>
         <h1>Sign in</h1>
+        ${rememberInvite() ? `<p class="notice blue" role="note"><strong>You’ve been invited to join a team.</strong> Sign in, or create an account, with the email address the invite was sent to.</p>` : ''}
         <p class="muted">Access is by invitation. ${cfg.supabase ? 'Your dashboard syncs across your signed-in devices.' : 'Your dashboard data stays in this browser.'}</p>
         ${error ? `<p class="notice" role="alert">${esc(error)}</p>` : ''}
         ${test
           ? `<p class="notice"><strong>Test build</strong> — fake identity provider for automated tests. Never deployed.</p>
              <form id="test-login" class="row wrap"><input id="test-user" type="text" placeholder="test account name" aria-label="Test account" required style="flex:1" />
              <button class="btn primary">Sign in (test)</button></form>`
-          : `<button id="login" class="btn primary lg" ${auth ? '' : 'disabled'}>Sign in</button>`}
+          : `<div class="row wrap"><button id="login" class="btn primary lg" ${auth ? '' : 'disabled'}>Sign in</button>
+             ${rememberInvite() ? `<button id="signup" class="btn lg" ${auth ? '' : 'disabled'}>Create an account</button>` : ''}</div>`}
       </div>
     </main>`;
   const btn = document.getElementById('login');
   if (btn && auth) btn.addEventListener('click', () => { btn.disabled = true; auth.login(); });
+  const up = document.getElementById('signup');
+  if (up && auth) up.addEventListener('click', () => { up.disabled = true; auth.login({ signup: true }); });
   // Someone signed in from another tab: load that account here too.
   window.addEventListener('storage', (e) => { if (e.key === ACTIVE_USER_KEY && e.newValue) window.location.reload(); });
   const form = document.getElementById('test-login');
@@ -41,6 +53,7 @@ function signInScreen(auth, error) {
 
 async function start() {
   root.innerHTML = '<main class="signin"><p class="muted">Loading…</p></main>';
+  rememberInvite();
   let auth;
   try {
     auth = await createAuth(cfg);
@@ -100,6 +113,29 @@ async function start() {
       catch (e) { if (e.denied) monitor && monitor.check(); throw e; }
     } : null,
     provider: auth.provider,
+    // Own profile (display name, photo) from the database; Team Work and Users show the same avatar.
+    profile: access && access.profile ? access.profile : null,
+    // Re-read this account with a fresh sign-in token (e.g. after confirming the email address).
+    refreshMe: rpc ? async () => {
+      await auth.getToken({ fresh: true });
+      const me = await rpc('register_me');
+      window.__dash.profile = me.profile || window.__dash.profile;
+      return me;
+    } : null,
+    // Team invites are emailed by /api/invite (see api/_invite.mjs). "Invite sent" only when it was.
+    sendInvite: rpc ? async (teamId, email) => {
+      let token;
+      try { token = await auth.getToken(); } catch (e) { throw Object.assign(new Error('Sign in again to send invites.'), { auth: true }); }
+      let res;
+      try {
+        res = await fetch('/api/invite', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ team_id: teamId, email }) });
+      } catch { throw Object.assign(new Error('No connection to the server. No invite was sent.'), { offline: true }); }
+      let body = null;
+      try { body = await res.json(); } catch { body = null; }
+      if (!res.ok || !body || body.sent !== true) throw Object.assign(new Error((body && body.message) || `The invite wasn’t sent (HTTP ${res.status}).`), { status: res.status, code: body && body.code, missing: body && body.missing });
+      return body;
+    } : null,
+    clearPendingInvite: () => { try { window.localStorage.removeItem(PENDING_INVITE); } catch { /* none */ } },
     storageKind: sync ? 'cloud' : 'browser',
     sync: sync && sync.api,
     // Dashboard data saved in this browser before cloud sync (never modified or deleted by the app).
@@ -114,6 +150,10 @@ async function start() {
       await auth.logout();
     },
   };
+  // Back from sign-in / sign-up / switching accounts with an invite still open: show it.
+  let pending = null;
+  try { pending = window.localStorage.getItem(PENDING_INVITE); } catch { /* none */ }
+  if (rpc && pending && !inviteInHash()) window.location.hash = '#/invite/' + pending;
   root.innerHTML = ''; // remove the full-height "Loading…" placeholder, or it stays under the dashboard as empty scroll space
   mount(root);
 

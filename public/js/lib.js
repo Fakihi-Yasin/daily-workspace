@@ -309,7 +309,7 @@ export function Empty({ title, children }) {
 }
 
 // "Actions ▾" button with a small menu: items are [text, onClick, 'danger'?].
-export function ActionsMenu({ label, items }) {
+export function ActionsMenu({ label, items, compact = false }) {
   const [open, setOpen] = useState(false);
   const [up, setUp] = useState(false);
   const [pos, setPos] = useState(null);
@@ -342,11 +342,66 @@ export function ActionsMenu({ label, items }) {
     return () => { document.removeEventListener('mousedown', away); el.removeEventListener('keydown', keys); window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); };
   }, [open]);
   return html`<div class="menu" ref=${ref}>
-    <button class="btn sm actions-btn" aria-haspopup="menu" aria-expanded=${open} aria-label=${'Actions for ' + label} onClick=${toggle}>
-      Actions <${Icon} name="chevD" size=${14} /></button>
+    ${compact
+      ? html`<button class=${'icon-btn actions-btn more-btn'} aria-haspopup="menu" aria-expanded=${open} aria-label=${'Actions for ' + label} title="More actions" onClick=${(e) => { e.preventDefault(); e.stopPropagation(); toggle(); }}>⋯</button>`
+      : html`<button class="btn sm actions-btn" aria-haspopup="menu" aria-expanded=${open} aria-label=${'Actions for ' + label} onClick=${toggle}>
+      Actions <${Icon} name="chevD" size=${14} /></button>`}
     ${open && html`<div class=${'menu-pop actions-pop' + (up ? ' up' : '')} role="menu" aria-label=${'Actions for ' + label}
       style=${pos ? { position: 'fixed', top: pos.top != null ? pos.top + 'px' : 'auto', bottom: pos.bottom != null ? pos.bottom + 'px' : 'auto', right: pos.right + 'px', left: 'auto' } : undefined}>
       ${items.map(([text, fn, tone]) => html`<button role="menuitem" class=${'item' + (tone === 'danger' ? ' danger' : '')} onClick=${() => { setOpen(false); fn(); }}>${text}</button>`)}
     </div>`}
   </div>`;
+}
+
+// ---------- avatars: a photo, or two initials from the display name ----------
+// "OSM BEN" → "OB", "Bianco Verde" → "BV", "Yasin" → "YA"; an email uses its name part.
+export function initials(name) {
+  let n = String(name || '').trim();
+  if (n.includes('@') && !n.includes(' ')) n = n.split('@')[0];
+  const words = n.split(/[\s._-]+/).map(w => [...w].filter(c => /[\p{L}\p{N}]/u.test(c)).join('')).filter(Boolean);
+  if (!words.length) return '?';
+  if (words.length === 1) return [...words[0]].slice(0, 2).join('').toUpperCase();
+  return ([...words[0]][0] + [...words[words.length - 1]][0]).toUpperCase();
+}
+const AVATAR_COLORS = 6;
+const avatarColor = (id) => { let h = 0; for (const c of String(id || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % AVATAR_COLORS; };
+
+// Photos come from the database (profile_photos), only for people the viewer shares a team with
+// (or anyone, for a Super Admin). Cached per account and photo version; requests are batched.
+const photoCache = new Map(); // `${id}:${v}` → src | null
+const photoWaiters = new Map(); // key → [resolve]
+let photoQueue = new Map(); // id → v
+let photoTimer = null;
+function flushPhotos() {
+  photoTimer = null;
+  const batch = photoQueue; photoQueue = new Map();
+  const ids = [...batch.keys()];
+  const rpc = window.__dash && window.__dash.rpc;
+  const done = (map) => { for (const [id, v] of batch) { const k = id + ':' + v; photoCache.set(k, (map && map[id]) || null); (photoWaiters.get(k) || []).forEach(f => f()); photoWaiters.delete(k); } };
+  if (!rpc || !ids.length) return done(null);
+  rpc('profile_photos', { p_ids: ids }).then(done, () => done(null));
+}
+export function forgetPhoto(id) { for (const k of [...photoCache.keys()]) if (k.startsWith(id + ':')) photoCache.delete(k); }
+function usePhoto(id, v) {
+  const k = id && v ? id + ':' + v : null;
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!k || photoCache.has(k)) return;
+    let live = true;
+    photoWaiters.set(k, [...(photoWaiters.get(k) || []), () => live && tick(x => x + 1)]);
+    if (!photoQueue.has(id)) { photoQueue.set(id, v); if (!photoTimer) photoTimer = setTimeout(flushPhotos, 0); }
+    return () => { live = false; };
+  }, [k]);
+  return k ? photoCache.get(k) || null : null;
+}
+
+// p: { id, name, email, photo_v }. `src` shows a given image (e.g. a preview) instead.
+export function Avatar({ p, size = 32, src }) {
+  const photo = usePhoto(p && p.id, p && p.photo_v);
+  const img = src || photo;
+  const label = (p && (p.name || p.email)) || '';
+  const style = `width:${size}px;height:${size}px;font-size:${Math.max(10, Math.round(size * 0.4))}px`;
+  return img
+    ? html`<img class="avatar" src=${img} alt="" width=${size} height=${size} style=${style} referrerpolicy="no-referrer" />`
+    : html`<span class=${'avatar initials c' + avatarColor(p && p.id)} style=${style} aria-hidden="true">${initials(label)}</span>`;
 }
