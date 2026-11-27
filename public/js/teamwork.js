@@ -11,14 +11,16 @@ export const rpc = (name, args) => window.__dash.rpc(name, args);
 export function useRpc(name, args, { poll = 20000 } = {}) {
   const key = name && JSON.stringify([name, args]);
   const [state, set] = useState({ data: null, error: null, key: null });
+  const version = useRef(0);
   const keyRef = useRef(key);
   keyRef.current = key;
   const load = useCallback(async () => {
     const k = keyRef.current;
     if (!k) return;
     const [n, a] = JSON.parse(k);
-    try { const data = await rpc(n, a); if (k === keyRef.current) set({ data, error: null, key: k }); }
-    catch (e) { if (k === keyRef.current) set(s => ({ ...s, error: e.message, key: k })); }
+    const request = ++version.current;
+    try { const data = await rpc(n, a); if (k === keyRef.current && request === version.current) set({ data, error: null, key: k }); }
+    catch (e) { if (k === keyRef.current && request === version.current) set(s => ({ ...s, error: e.message, key: k })); }
   }, []);
   useEffect(() => { load(); }, [key]);
   useEffect(() => bus.on(load), []);
@@ -160,7 +162,7 @@ function TeamLanding() {
 }
 
 // ---------- one team ----------
-const TABS = [['board', 'Board'], ['people', 'People'], ['scores', 'Daily score'], ['future', 'Future projects'], ['activity', 'Activity']];
+const TABS = [['board', 'Board'], ['people', 'People'], ['scores', 'Daily score'], ['future', 'Future projects'], ['routines', 'Routines'], ['remarks', 'Remarks'], ['activity', 'Activity']];
 
 function TeamPage({ id }) {
   const { data, error } = useRpc('team_get', { p_team_id: id });
@@ -177,6 +179,8 @@ function TeamPage({ id }) {
   const seenFor = useRef(null);
   const loadedAt = data && data.loaded_at;
   const isMember = !!data && (data.me.access === 'owner' || data.me.access === 'member');
+  const inbox = useRpc(isMember ? 'team_remark_inbox' : null, { p_team_id: id });
+  const unreadRemarks = (inbox.data || []).reduce((total, thread) => total + thread.unread, 0);
   useEffect(() => {
     if (tab !== 'board' || !loadedAt || !isMember) return;
     if (seenFor.current === loadedAt && !unreadHere) return;
@@ -206,12 +210,14 @@ function TeamPage({ id }) {
       <div class=${'tile' + (overdue ? ' warn' : '')}><span class="v">${overdue}</span><span class="k">Overdue</span></div>
       <div class="tile"><span class="v">${t.filter(k => k.status === 'done').length}</span><span class="k">Done</span></div>
     </div>
-    <div class="tabs" role="tablist">${TABS.map(([k, l]) => html`<button role="tab" aria-selected=${tab === k} class=${tab === k ? 'on' : ''} onClick=${() => selectTab(k)}>${l}
-      ${k === 'people' ? html`<span class="count">${data.members.length}</span>` : k === 'future' ? html`<span class="count">${data.projects.filter(p => !p.moved_at).length}</span>` : ''}</button>`)}</div>
+    <div class="tabs" role="tablist">${TABS.filter(([k]) => isMember || !['remarks', 'routines'].includes(k)).map(([k, l]) => html`<button role="tab" aria-selected=${tab === k} class=${tab === k ? 'on' : ''} onClick=${() => selectTab(k)}>${l}
+      ${k === 'remarks' && unreadRemarks > 0 ? html`<span class="team-badge">${unreadRemarks}</span>` : k === 'people' ? html`<span class="count">${data.members.length}</span>` : k === 'future' ? html`<span class="count">${data.projects.filter(p => !p.moved_at).length}</span>` : ''}</button>`)}</div>
     ${tab === 'board' && html`<${Board} ctx=${ctx} />`}
     ${tab === 'people' && html`<${People} ctx=${ctx} />`}
     ${tab === 'scores' && html`<${Scores} ctx=${ctx} />`}
     ${tab === 'future' && html`<${Future} ctx=${ctx} />`}
+    ${isMember && tab === 'routines' && html`<${TeamRoutines} ctx=${ctx} />`}
+    ${isMember && tab === 'remarks' && html`<${RemarksInbox} ctx=${ctx} inbox=${inbox} />`}
     ${tab === 'activity' && html`<${Activity} ctx=${ctx} />`}
   </div>`;
 }
@@ -240,8 +246,9 @@ const canEdit = (ctx, k) => ctx.owner || (ctx.member && k.created_by && k.create
 const canStatus = (ctx, k) => canEdit(ctx, k) || (ctx.member && k.assignee && k.assignee.id === ctx.me.id);
 
 function PersonLabel({ person, me }) {
+  const name = person?.name?.trim() || person?.email || 'Unknown teammate';
   return person
-    ? html`<span class="team-person"><${Avatar} p=${person} size=${24} /><span>${person.name}</span>
+    ? html`<span class="team-person"><${Avatar} p=${person} size=${24} /><span class="team-person-name" title=${name}>${name}</span>
         ${person.id === me && html`<${Chip} color="blue">Me<//>`}</span>`
     : html`<span class="team-unassigned">Unassigned</span>`;
 }
@@ -258,13 +265,15 @@ function PersonPicker({ ctx, label, value, onChange, filter = false }) {
     onBlur=${e => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false); }}
     onKeyDown=${e => { if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false); button.current.focus(); } }}>
     <button type="button" ref=${button} class="btn picker-current" aria-label=${label} aria-expanded=${open}
-      onClick=${() => setOpen(!open)}>${content(value === 'all' ? 'Everyone' : selected)}<span aria-hidden="true">▾</span></button>
+      onClick=${() => setOpen(!open)}>${content(value === 'all' ? 'Everyone' : selected)}<span class="picker-arrow" aria-hidden="true">▾</span></button>
     ${open && html`<div class="picker-options" role="group" aria-label=${label}>
       ${options.map(([key, p]) => html`<button key=${key} type="button" aria-pressed=${value === key}
         onClick=${() => { onChange(key); setOpen(false); button.current.focus(); }}>${content(p)}</button>`)}
     </div>`}
   </div>`;
 }
+
+const TEAM_CARD_TRANSFER = 'application/x-daily-workspace-team-task';
 
 function Board({ ctx }) {
   const [who, setWho] = useState('all');
@@ -274,15 +283,17 @@ function Board({ ctx }) {
   const [dragging, setDragging] = useState(null);
   const [moving, setMoving] = useState(false);
   const drag = useRef(null);
+  const savingMove = useRef(false);
   const tcats = ctx.team.categories || [];
   const tasks = ctx.team.tasks.filter(k => (who === 'all' || (who === 'none' ? !k.assignee : k.assignee && k.assignee.id === who))
     && (catF === 'all' || (catF === 'none' ? !k.category_id : k.category_id === catF)));
   const stop = () => { drag.current = null; setDragging(null); };
   const move = async (id, status, before) => {
-    if (moving) return;
+    if (savingMove.current) return;
+    savingMove.current = true;
     setMoving(true);
     try { await change('team_task_move', { p_task_id: id, p_status: status, p_before_id: before }); }
-    catch { /* toast shown */ } finally { setMoving(false); }
+    catch { /* toast shown */ } finally { savingMove.current = false; setMoving(false); }
   };
   return html`<div>
     ${ctx.member && html`<${NewTask} ctx=${ctx} />`}
@@ -294,38 +305,51 @@ function Board({ ctx }) {
     <div class="board">
       ${STATUSES.map(([status, label, color]) => html`<${BoardColumn} key=${status} status=${status} label=${label} color=${color}
         tasks=${tasks.filter(k => k.status === status)} ctx=${ctx} dragging=${dragging}
-        canDrop=${() => !!drag.current && !moving}
-        onDrag=${(e, k) => { drag.current = k.id; setDragging(k.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', k.id); }}
-        onEnd=${stop} onDrop=${before => { const id = drag.current; stop(); if (id) void move(id, status, before); }}
+        canDrop=${e => !moving && (drag.current || Array.from(e.dataTransfer.types).includes(TEAM_CARD_TRANSFER))}
+        onDrag=${(e, k) => {
+          drag.current = k.id;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData(TEAM_CARD_TRANSFER, k.id);
+          e.dataTransfer.setData('text/plain', k.id);
+          setDragging(k.id);
+        }}
+        onEnd=${stop} onDrop=${(e, before) => {
+          const id = e.dataTransfer.getData(TEAM_CARD_TRANSFER) || drag.current;
+          stop();
+          if (ctx.team.tasks.some(k => k.id === id && canStatus(ctx, k))) void move(id, status, before);
+        }}
         onStatus=${move} onEdit=${setEditing} onRemarks=${setRemarks} />`)}
     </div>
     ${editing && html`<${TaskModal} ctx=${ctx} task=${editing} onClose=${() => setEditing(null)} />`}
-    ${remarks && html`<${RemarksModal} task=${remarks} onClose=${() => setRemarks(null)} />`}
+    ${remarks && html`<${RemarksModal} teamId=${ctx.team.team.id} task=${remarks} onClose=${() => setRemarks(null)} />`}
   </div>`;
 }
 
 function BoardColumn({ status, label, color, tasks, ctx, dragging, canDrop, onDrag, onEnd, onDrop, onStatus, onEdit, onRemarks }) {
   const list = useFiveRows();
   function dragOver(e) {
-    if (!canDrop()) return;
+    if (!canDrop(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     const el = list.current;
+    if (!el.contains(e.target)) return;
     const bounds = el.getBoundingClientRect();
     if (e.clientY > bounds.bottom - 28) el.scrollTop += 10;
     else if (e.clientY < bounds.top + 28) el.scrollTop -= 10;
   }
   function drop(e) {
-    if (!canDrop()) return;
+    if (!canDrop(e)) return;
     e.preventDefault();
-    const next = Array.from(list.current.querySelectorAll('[data-task-id]')).find(card => {
+    const el = list.current;
+    const id = e.dataTransfer.getData(TEAM_CARD_TRANSFER) || dragging;
+    const next = el.contains(e.target) && Array.from(el.querySelectorAll('[data-task-id]')).find(card => {
       const rect = card.getBoundingClientRect();
-      return card.dataset.taskId !== dragging && e.clientY < rect.top + rect.height / 2;
+      return card.dataset.taskId !== id && e.clientY < rect.top + rect.height / 2;
     });
-    onDrop(next ? next.dataset.taskId : null);
+    onDrop(e, next ? next.dataset.taskId : null);
   }
   return html`<section class=${'board-col ' + status + (dragging ? ' dropping' : '')} aria-label=${label}
-      onDragOver=${dragOver} onDrop=${drop}>
+      onDragEnter=${dragOver} onDragOver=${dragOver} onDrop=${drop}>
     <h4><${Chip} color=${color}>${label}<//><span class="muted small" aria-label=${tasks.length + ' tasks'}>${tasks.length}</span></h4>
     <div class="board-list five-row-list" ref=${list} tabindex="0" aria-label=${label + ' tasks'}>
       ${tasks.length === 0 ? html`<p class="small muted board-empty">Nothing here.</p>` : tasks.map(k => html`
@@ -360,8 +384,15 @@ function TaskCard({ k, ctx, onDrag, onEnd, onStatus, onEdit, onRemarks }) {
   </article>`;
 }
 
-function RemarksModal({ task, onClose }) {
-  const { data, error } = useRpc('team_remarks', { p_task_id: task.id });
+function RemarksModal({ teamId, task, thread, onClose }) {
+  const rootId = thread?.id;
+  const { data, error } = useRpc(task ? 'team_remarks' : rootId ? 'team_remark_thread' : null,
+    task ? { p_task_id: task.id } : { p_team_id: teamId, p_root_id: rootId });
+  const readKey = data && data.map(r => r.id).join(',');
+  useEffect(() => {
+    if (!readKey) return;
+    rpc('team_remark_read', { p_team_id: teamId, p_ids: readKey.split(',') }).then(() => bus.emit(false), () => {});
+  }, [teamId, readKey]);
   const [body, setBody] = useState('');
   const [urgent, setUrgent] = useState(false);
   const [reply, setReply] = useState(null);
@@ -371,7 +402,10 @@ function RemarksModal({ task, onClose }) {
     if (!body.trim() || busy) return;
     setBusy(true);
     try {
-      await change('team_remark_add', { p_task_id: task.id, p_body: body, p_urgent: urgent, p_parent_id: reply }, reply ? 'Reply added' : 'Remark added');
+      await (task
+        ? change('team_remark_add', { p_task_id: task.id, p_body: body, p_urgent: urgent, p_parent_id: reply }, reply ? 'Reply added' : 'Remark added')
+        : change('team_remark_post', { p_team_id: teamId, p_body: body, p_urgent: urgent, p_root_id: reply || rootId || null }, rootId ? 'Reply added' : 'Remark added'));
+      if (!task && !rootId) onClose();
       setBody(''); setUrgent(false); setReply(null);
     } catch { /* toast shown */ } finally { setBusy(false); }
   };
@@ -379,22 +413,23 @@ function RemarksModal({ task, onClose }) {
     <div class="row wrap small"><${Avatar} p=${r.author} size=${24} /><strong>${r.author?.name || 'Former member'}</strong>
       <span class="muted">${fmtWhen(r.at)}</span>${r.urgent && html`<${Chip} color=${r.checked_at ? 'ink' : 'pink'}>Urgent<//>`}
       ${r.checked_at && html`<${Chip} color="mint">Checked<//>`}</div><p>${r.body}</p></div>`;
-  return html`<${Modal} title="Task remarks" onClose=${onClose}>
-    <p class="muted"><${TaskText} text=${task.title} /></p>
-    ${error ? html`<p role="alert">${error}</p>` : !data ? html`<p>Loading…</p>` : html`<div class="stack remark-thread">
+  return html`<${Modal} title=${task ? 'Task remarks' : rootId ? 'Remark thread' : 'New remark'} onClose=${onClose}>
+    ${(task || thread?.task_title) && html`<p class="muted"><${TaskText} text=${task?.title || thread.task_title} /></p>`}
+    ${error ? html`<p role="alert">${error}</p>` : !data ? (task || rootId ? html`<p>Loading…</p>` : null) : html`<div class="stack remark-thread">
       ${data.filter(r => !r.parent_id).map(r => html`<article class="card flat" key=${r.id}>
         ${line(r)}
         ${data.filter(x => x.parent_id === r.id).map(x => html`<div class="remark-reply" key=${x.id}>${line(x)}</div>`)}
         <div class="row wrap"><button type="button" class="btn sm" onClick=${() => setReply(r.id)}>Reply</button>
           ${r.can_check && !r.checked_at && html`<button type="button" class="btn sm"
-            onClick=${() => change('team_remark_check', { p_task_id: task.id, p_remark_id: r.id }, 'Remark checked').catch(() => {})}>Mark Checked</button>`}</div>
+            onClick=${() => (task ? change('team_remark_check', { p_task_id: task.id, p_remark_id: r.id }, 'Remark checked')
+              : change('team_remark_resolve', { p_team_id: teamId, p_root_id: r.id }, 'Remark checked')).catch(() => {})}>Mark Checked</button>`}</div>
       </article>`)}
     </div>`}
     <form class="stack" onSubmit=${submit}>
-      <label class="field">${reply ? 'Your reply' : 'Remark or question'}<textarea rows="3" maxlength="2000" required value=${body} onInput=${e => setBody(e.target.value)} /></label>
+      <label class="field">${reply || rootId ? 'Your reply' : 'Remark or question'}<textarea rows="3" maxlength="2000" required value=${body} onInput=${e => setBody(e.target.value)} /></label>
       <div class="row wrap">${reply ? html`<button type="button" class="btn" onClick=${() => setReply(null)}>Cancel reply</button>`
-        : html`<label class="row"><input type="checkbox" checked=${urgent} onChange=${e => setUrgent(e.target.checked)} />Urgent</label>`}
-        <span class="spacer"></span><button class="btn primary" disabled=${busy || !body.trim()}>${reply ? 'Post reply' : 'Post remark'}</button></div>
+        : !rootId && html`<label class="row"><input type="checkbox" checked=${urgent} onChange=${e => setUrgent(e.target.checked)} />Urgent</label>`}
+        <span class="spacer"></span><button class="btn primary" disabled=${busy || !body.trim()}>${reply || rootId ? 'Post reply' : 'Post remark'}</button></div>
     </form>
   <//>`;
 }
@@ -415,7 +450,7 @@ function NewTask({ ctx }) {
   return html`<form class="card flat team-new-task" onSubmit=${submit} aria-label="New team task">
     <input type="text" maxlength="500" placeholder="New task title" aria-label="Task title" value=${f.title} onInput=${(e) => set({ ...f, title: e.target.value })} class="team-task-input" />
     <${PersonPicker} label="Assignee" ctx=${ctx} value=${f.assignee} onChange=${assignee => set({ ...f, assignee })} />
-    <input type="date" aria-label="Due date" value=${f.due} onInput=${(e) => set({ ...f, due: e.target.value })} />
+    <input class="team-task-date" type="date" aria-label="Due date" value=${f.due} onInput=${(e) => set({ ...f, due: e.target.value })} />
     <select aria-label="Status" value=${f.status} onChange=${(e) => set({ ...f, status: e.target.value })}>${STATUSES.map(([v, l]) => html`<option value=${v}>${l}</option>`)}</select>
     ${active.length > 0 && html`<select aria-label="Team category" value=${f.category} onChange=${(e) => set({ ...f, category: e.target.value })}>
       <option value="">No category</option>${active.map(c => html`<option value=${c.id}>${c.name}</option>`)}</select>`}
@@ -745,18 +780,103 @@ function StartModal({ p, ctx, onClose }) {
 
 // ---------- activity ----------
 const EVENT_TEXT = {
-  team_created: 'created the team', team_renamed: 'renamed the team to', member_added: 'added', member_removed: 'removed',
-  member_invited: 'invited', invite_accepted: 'joined by invite:', invite_declined: 'declined the invite for',
-  task_created: 'added the task', task_status: 'changed a status →', task_assigned: 'assigned', task_edited: 'edited', task_deleted: 'deleted the task',
-  project_added: 'planned', project_started: 'moved to active work:',
+  team_created: ['teams', 'Created team'], team_renamed: ['edit', 'Renamed team'],
+  member_added: ['users', 'Added member'], member_removed: ['users', 'Removed member'],
+  member_invited: ['users', 'Invited'], invite_accepted: ['users', 'Joined by invite'], invite_declined: ['users', 'Declined invite'],
+  task_created: ['plus', 'Added task'], task_status: ['check', 'Changed status'], task_assigned: ['users', 'Assigned task'],
+  task_edited: ['edit', 'Edited task'], task_deleted: ['trash', 'Deleted task'],
+  project_added: ['projects', 'Planned project'], project_started: ['projects', 'Moved project to active work'],
+  routine_added: ['history', 'Added routine'], routine_edited: ['edit', 'Updated routine'],
 };
 function Activity({ ctx }) {
-  const ev = ctx.team.events;
-  if (!ev.length) return html`<${Empty} title="No activity yet" />`;
-  return html`<ul class="activity">${ev.map((e, i) => html`<li key=${i}>
-    <span class="muted small">${fmtWhen(e.at)}</span>
-    <span><strong>${e.actor.name}</strong> ${EVENT_TEXT[e.action] || e.action} ${e.action === 'task_status' ? html`<em>${statusLabel((e.detail || '').split(':')[0])}</em>: ${(e.detail || '').split(': ').slice(1).join(': ')}` : e.detail}</span>
-  </li>`)}</ul>`;
+  if (!ctx.team.events.length) return html`<${Empty} title="No activity yet" />`;
+  return html`<ol class="team-timeline">${ctx.team.events.map((e, i) => {
+    const [icon, label] = EVENT_TEXT[e.action] || ['history', e.action.replaceAll('_', ' ')];
+    const detail = e.detail || '';
+    const colon = detail.indexOf(': ');
+    const status = e.action === 'task_status' && colon >= 0 ? statusLabel(detail.slice(0, colon)) : null;
+    return html`<li key=${e.at + i}>
+      <span class="timeline-icon"><${Icon} name=${icon} size=${14} /></span>
+      <div class="timeline-content">
+        <div class="row wrap small"><${Avatar} p=${e.actor} size=${24} />
+          <strong>${e.actor?.name || 'Former member'}</strong><span class="muted">${label}</span>
+          <time datetime=${e.at} class="muted">${fmtWhen(e.at)}</time></div>
+        ${detail && html`<div class="timeline-item">${status ? detail.slice(colon + 2) : detail}
+          ${status && html` <${Chip}>${status}<//>`}</div>`}
+      </div>
+    </li>`;
+  })}</ol>`;
+}
+
+function RemarksInbox({ ctx, inbox }) {
+  const [open, setOpen] = useState(null);
+  const [task, setTask] = useState(null);
+  return html`<section class="stack">
+    <div class="row"><button class="btn primary" onClick=${() => setOpen({})}>New remark</button></div>
+    ${inbox.error ? html`<p role="alert">${inbox.error}</p>` : !inbox.data ? html`<p>Loading…</p>`
+      : !inbox.data.length ? html`<${Empty} title="No remarks yet" />` : inbox.data.map(r => html`<article class="card flat stack" key=${r.id}>
+        <div class="row wrap small"><${PersonLabel} person=${r.author} me=${ctx.me.id} />
+          <time class="muted" datetime=${r.at}>${fmtWhen(r.at)}</time>
+          ${r.unread > 0 && html`<span class="team-badge">${r.unread} unread</span>`}
+          ${r.urgent && html`<${Chip} color=${r.checked_at ? 'ink' : 'pink'}>Urgent<//>`}
+          ${r.checked_at && html`<${Chip} color="mint">Checked<//>`}</div>
+        <p class="remark-preview">${r.body}</p>
+        <div class="row wrap"><button class="btn sm" onClick=${() => setOpen(r)}>Open thread</button>
+          ${r.task_title && html`<button class="btn sm linked-task" title=${r.task_title}
+            onClick=${() => setTask(ctx.team.tasks.find(t => t.id === r.task_id))}>${r.task_title}</button>`}</div>
+      </article>`)}
+    ${open && html`<${RemarksModal} teamId=${ctx.team.team.id} thread=${open} onClose=${() => setOpen(null)} />`}
+    ${task && (canEdit(ctx, task) ? html`<${TaskModal} ctx=${ctx} task=${task} onClose=${() => setTask(null)} />`
+      : html`<${Modal} title="Team task" onClose=${() => setTask(null)}>
+          <div class="stack"><strong><${TaskText} text=${task.title} /></strong>
+            <div class="row wrap"><${Chip}>${statusLabel(task.status)}<//><${PersonLabel} person=${task.assignee} me=${ctx.me.id} />
+              ${task.due_date && html`<span class="small muted">Due ${fmtShort(task.due_date)}</span>`}</div></div>
+        <//>`)}
+  </section>`;
+}
+
+const TEAM_REPEATS = [['daily', 'Daily'], ['weekdays', 'Weekdays'], ['weekly', 'Weekly'], ['monthly', 'Monthly']];
+function TeamRoutines({ ctx }) {
+  const team = ctx.team.team.id;
+  const { data, error } = useRpc('team_routines', { p_team_id: team });
+  const [form, setForm] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const save = async e => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await change('team_routine_save', { p_team_id: team, p_id: form.id || null, p_title: form.title,
+        p_assignee_id: form.assignee_id || null, p_recurrence: form.recurrence, p_starts_on: form.starts_on,
+        p_active: form.active }, 'Routine saved');
+      setForm(null);
+    } catch { /* toast shown */ } finally { setBusy(false); }
+  };
+  return html`<section class="stack">
+    <div class="row"><button class="btn primary" onClick=${() => setForm({ title: '', assignee_id: ctx.me.id, starts_on: ctx.today, recurrence: 'weekly', active: true })}>Add routine</button></div>
+    <p class="small muted">Completing a routine task schedules its next occurrence on this board.</p>
+    ${error ? html`<p role="alert">${error}</p>` : !data ? html`<p>Loading…</p>` : !data.length
+      ? html`<${Empty} title="No team routines" />` : data.map(r => html`<article class="card flat row wrap" key=${r.id}>
+        <strong>${r.title}</strong><${PersonLabel} person=${ctx.team.members.find(m => m.id === r.assignee_id)} me=${ctx.me.id} />
+        <${Chip}>${r.active ? TEAM_REPEATS.find(([key]) => key === r.recurrence)?.[1] : 'Paused'}<//>
+        <span class="spacer"></span>${r.can_edit && html`<button class="btn sm" onClick=${() => setForm({ ...r,
+          assignee_id: ctx.team.members.some(m => m.id === r.assignee_id) ? r.assignee_id : '' })}>Manage</button>`}
+      </article>`)}
+    ${form && html`<${Modal} title=${form.id ? 'Manage routine' : 'Add team routine'} onClose=${() => setForm(null)}>
+      <form class="stack" onSubmit=${save}>
+        <label class="field">Task title<input required maxlength="500" value=${form.title} onInput=${e => setForm({ ...form, title: e.target.value })} /></label>
+        <div class="field">Assignee<${PersonPicker} ctx=${ctx} label="Routine assignee" value=${form.assignee_id}
+          onChange=${assignee_id => setForm({ ...form, assignee_id })} /></div>
+        <label class="field">Recurrence<select value=${form.recurrence} onChange=${e => setForm({ ...form, recurrence: e.target.value })}>
+          ${TEAM_REPEATS.map(([key, label]) => html`<option value=${key}>${label}</option>`)}</select></label>
+        <label class="field">Start date<input type="date" required disabled=${!!form.id} value=${form.starts_on}
+          onInput=${e => setForm({ ...form, starts_on: e.target.value })} /></label>
+        ${form.id && html`<label class="row"><input type="checkbox" checked=${!form.active}
+          onChange=${e => setForm({ ...form, active: !e.target.checked })} />Pause future occurrences</label>`}
+        <div class="row"><span class="spacer"></span><button class="btn primary" disabled=${busy}>Save routine</button></div>
+      </form>
+    <//>`}
+  </section>`;
 }
 
 // ---------- accepting an invite (#/invite/<token>) ----------

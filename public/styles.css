@@ -914,3 +914,29 @@ kbd { font: 600 12px/1 ui-monospace, monospace; padding: 2px 6px; border: 1px so
   .team-task-input { flex-basis: 100%; }
   .team-new-task .person-picker { flex: 1 1 175px; }
 }
+
+/* Assignee controls keep their text inside the available track. */
+.person-picker .team-person { display: flex; flex: 1; overflow: hidden; white-space: nowrap; }
+.person-picker .team-person-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.person-picker .team-person > :last-child:not(.team-person-name), .picker-arrow { flex: none; }
+.person-picker .team-unassigned { display: block; margin-inline-start: 30px; padding: 0; border: 0; }
+.picker-current { display: flex; gap: 8px; min-width: 0; }
+.picker-options > button { display: flex; align-items: center; min-width: 0; }
+.team-new-task .person-picker { flex: 1 1 205px; max-width: 260px; }
+.team-new-task .team-task-date { flex: 0 0 150px; width: 150px; min-width: 0; }
+.board { align-items: stretch; }
+.board-col { min-height: 110px; }
+.board-col > h4 { flex: none; }
+.board-list { flex: 1 1 auto; }
+.team-timeline { list-style: none; padding: 0; margin: 14px 0; }
+.team-timeline > li { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; padding: 0 0 12px; }
+.timeline-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--track); color: var(--muted); }
+.timeline-content { padding: 4px 10px 8px; border-inline-start: 2px solid var(--line); }
+.timeline-content time { margin-inline-start: auto; }
+.timeline-item { margin: 4px 0 0; overflow-wrap: anywhere; }
+.remark-preview { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.linked-task { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 560px) {
+  .team-new-task .person-picker { flex: 1 1 180px; max-width: 100%; }
+  .team-new-task .team-task-date { flex-basis: 140px; width: 140px; }
+}

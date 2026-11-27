@@ -138,3 +138,47 @@ test('six board tasks, cross-column move, same-column reorder and scoped remark 
   assert.equal(checked.remark_count, 1);
   assert.equal(checked.status, 'in_progress');
 });
+
+test('remark inbox counts each teammate message, acknowledges only those read and keeps threads in the team', async () => {
+  const team = (await call('OWN', 'team_create', { p_name: 'Inbox test' })).id;
+  const invite = await call('OWN', 'team_invite_create', { p_team_id: team, p_email: 'mem@example.test' });
+  await call('MEM', 'my_invite_accept', { p_invite_id: invite.id });
+  const task = (await call('OWN', 'team_task_create', { p_team_id: team, p_title: 'Linked work', p_assignee_id: MEM })).id;
+  const linked = await call('OWN', 'team_remark_add', { p_task_id: task, p_body: 'Linked', p_urgent: true });
+  const standalone = await call('MEM', 'team_remark_post', { p_team_id: team, p_body: 'Standalone', p_urgent: true });
+  const reply = await call('OWN', 'team_remark_post', { p_team_id: team, p_body: 'Answer', p_root_id: standalone.id });
+  const inbox = () => call('MEM', 'team_remark_inbox', { p_team_id: team });
+  assert.deepEqual((await inbox()).map(r => [r.id,r.unread]).sort(), [[linked.id,1],[standalone.id,1]].sort());
+  assert.equal((await inbox()).find(r => r.id===linked.id).task_title,'Linked work');
+  await call('MEM', 'team_remark_read', { p_team_id: team, p_ids: [linked.id] });
+  assert.equal((await inbox()).find(r => r.id===linked.id).unread,0);
+  assert.equal((await inbox()).find(r => r.id===standalone.id).unread,1);
+  await call('MEM', 'team_remark_resolve', { p_team_id: team, p_root_id: standalone.id });
+  const thread = await call('MEM', 'team_remark_thread', { p_team_id: team, p_root_id: standalone.id });
+  assert.ok(thread[0].checked_at);
+  assert.equal(thread[1].id,reply.id);
+  await refused(call('OUT','team_remark_thread',{p_team_id:team,p_root_id:standalone.id}),/Team not found/);
+  await refused(call('SA','team_remark_inbox',{p_team_id:team}),/Only team members/);
+});
+
+test('team routines preserve assignment and create one occurrence per date on repeated completion', async () => {
+  const team = (await call('OWN', 'team_create', { p_name: 'Routine test' })).id;
+  const invite = await call('OWN', 'team_invite_create', { p_team_id: team, p_email: 'mem@example.test' });
+  await call('MEM', 'my_invite_accept', { p_invite_id: invite.id });
+  const params = { p_team_id:team,p_title:'Weekly review',p_assignee_id:MEM,p_recurrence:'weekly',p_starts_on:'2026-11-27' };
+  const r = await call('OWN','team_routine_save',params);
+  const cards = () => call('MEM','team_get',{p_team_id:team}).then(x=>x.tasks);
+  const [first] = await cards();
+  assert.equal(first.assignee.id,MEM);
+  const update = status => call('MEM','team_task_move',{p_task_id:first.id,p_status:status});
+  await update('done'); await update('todo'); await update('done');
+  assert.deepEqual((await cards()).map(t=>t.due_date).sort(),['2026-11-27','2026-12-04']);
+  await refused(call('MEM','team_routine_save',{...params,p_id:r.id,p_active:false}),/creator or team owner/);
+  await call('OWN','team_routine_save',{...params,p_id:r.id,p_active:false});
+  const second = (await cards()).find(t=>t.id!==first.id);
+  await call('MEM','team_task_move',{p_task_id:second.id,p_status:'done'});
+  assert.equal((await cards()).length,2);
+  await call('OWN','team_routine_save',{...params,p_id:r.id,p_active:true});
+  assert.deepEqual((await cards()).map(t=>t.due_date).sort(),['2026-11-27','2026-12-04','2026-12-11']);
+  await refused(call('OUT','team_routines',{p_team_id:team}),/Team not found/);
+});
