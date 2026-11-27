@@ -38,15 +38,16 @@ function useFieldPopup(id) {
     setOpen(false);
     if (focus) trigger.current?.focus();
   }
+  function focusFirst() {
+    const picked = panel.current?.querySelector('[data-popup-focus]:not([disabled]), [role=option][aria-selected=true]:not([disabled])');
+    (picked || panel.current?.querySelector('button:not([disabled])'))?.focus();
+  }
   function show(focus = true) {
     if (panel.current.matches(':popover-open')) return;
     panel.current.showPopover();
     setOpen(true);
     place();
-    if (focus) requestAnimationFrame(() => {
-      const picked = panel.current?.querySelector('[data-popup-focus]:not([disabled]), [role=option][aria-selected=true]:not([disabled])');
-      (picked || panel.current?.querySelector('button:not([disabled])'))?.focus();
-    });
+    if (focus) focusFirst();
   }
   function toggle() {
     if (panel.current.matches(':popover-open')) close();
@@ -79,7 +80,7 @@ function useFieldPopup(id) {
     close();
   };
   return {
-    open, close, show, toggle, place,
+    open, close, show, toggle, place, focusFirst,
     triggerProps: { ref: trigger, id, 'aria-expanded': open, onKeyDown: escape },
     panelProps: {
       ref: panel, popover: 'auto', onToggle: e => setOpen(e.newState === 'open'),
@@ -180,8 +181,12 @@ export function DateField({ value = '', min, max, disabled, required, onInput, o
     (onInput || onChange)?.({ target, currentTarget: target });
   };
   const show = () => {
-    if (!popup.open) setPage((value || todayIso()).slice(0,7));
-    popup.toggle();
+    if (popup.open) return popup.close();
+    const current = (value || todayIso()).slice(0,7);
+    if (current === page) return popup.show();
+    setPage(current);
+    popup.show(false);
+    requestAnimationFrame(() => { popup.place(); popup.focusFirst(); });
   };
   const prev = step(month ? -12 : -1);
   const next = step(month ? 12 : 1);
