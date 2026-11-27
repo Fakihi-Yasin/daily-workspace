@@ -58,15 +58,21 @@ async function sendEmail(cfg, msg, fetchImpl) {
   try {
     res = await fetchImpl('https://api.resend.com/emails', {
       method: 'POST',
+      signal: AbortSignal.timeout(7000),
       headers: { Authorization: `Bearer ${cfg.key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: cfg.from, to: [msg.to], subject: msg.subject, html: msg.html, text: msg.text }),
     });
   } catch {
     return { ok: false, reason: 'the email service could not be reached' };
   }
-  if (res.ok) return { ok: true };
-  let detail = '';
-  try { const b = await res.json(); detail = b && (b.message || b.name) ? String(b.message || b.name).slice(0, 200) : ''; } catch { /* none */ }
+  let body = null;
+  try { body = await res.json(); } catch { /* provider response was unreadable */ }
+  if (res.ok) {
+    return typeof body?.id === 'string' && body.id.trim()
+      ? { ok: true }
+      : { ok: false, reason: 'the email service did not confirm acceptance' };
+  }
+  const detail = body && (body.message || body.name) ? String(body.message || body.name).slice(0, 200) : '';
   return { ok: false, reason: `the email service refused it (HTTP ${res.status}${detail ? ': ' + detail : ''})` };
 }
 

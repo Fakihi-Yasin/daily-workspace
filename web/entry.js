@@ -25,26 +25,39 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
 
 function signInScreen(auth, error) {
   const test = auth && auth.provider === 'test';
+  const invite = rememberInvite();
   root.innerHTML = `
     <main class="signin">
       <div class="signin-card card">
         <div class="brand signin-brand"><i>✓</i><span>Dashboard</span></div>
-        <h1>Sign in</h1>
-        ${rememberInvite() ? `<p class="notice blue" role="note"><strong>You’ve been invited to join a team.</strong> Sign in, or create an account, with the email address the invite was sent to.</p>` : ''}
-        <p class="muted">Access is by invitation. ${cfg.supabase ? 'Your dashboard syncs across your signed-in devices.' : 'Your dashboard data stays in this browser.'}</p>
-        ${error ? `<p class="notice" role="alert">${esc(error)}</p>` : ''}
+        <h1>Daily Workspace</h1>
+        ${invite ? `<p class="notice blue" role="note"><strong>You’ve been invited to join a team.</strong> Sign in, or create an account, with the email address the invite was sent to.</p>` : ''}
+        <p class="muted">Sign in to your workspace or create an account.</p>
+        <p id="signin-error" class="notice" role="alert" ${error ? '' : 'hidden'}>${esc(error || '')}</p>
         ${test
           ? `<p class="notice"><strong>Test build</strong> — fake identity provider for automated tests. Never deployed.</p>
              <form id="test-login" class="row wrap"><input id="test-user" type="text" placeholder="test account name" aria-label="Test account" required style="flex:1" />
              <button class="btn primary">Sign in (test)</button></form>`
-          : `<div class="row wrap"><button id="login" class="btn primary lg" ${auth ? '' : 'disabled'}>Sign in</button>
-             ${rememberInvite() ? `<button id="signup" class="btn lg" ${auth ? '' : 'disabled'}>Create an account</button>` : ''}</div>`}
+          : auth ? `<div class="row wrap"><button id="login" class="btn primary lg">Sign in</button>
+             <button id="signup" class="btn lg">Create an account</button></div>`
+            : `<button id="retry-login" class="btn primary lg">Try again</button>`}
       </div>
     </main>`;
-  const btn = document.getElementById('login');
-  if (btn && auth) btn.addEventListener('click', () => { btn.disabled = true; auth.login(); });
-  const up = document.getElementById('signup');
-  if (up && auth) up.addEventListener('click', () => { up.disabled = true; auth.login({ signup: true }); });
+  const buttons = Array.from(root.querySelectorAll('#login,#signup'));
+  const startLogin = (signup) => async () => {
+    buttons.forEach(b => { b.disabled = true; });
+    const notice = document.getElementById('signin-error');
+    notice.hidden = true;
+    try {
+      await auth.login({ signup, hash: invite ? '#/invite/' + invite : window.location.hash });
+    } catch (e) {
+      notice.textContent = e.message || 'Sign-in could not start. Try again.';
+      notice.hidden = false;
+      buttons.forEach(b => { b.disabled = false; });
+    }
+  };
+  for (const button of buttons) button.addEventListener('click', startLogin(button.id === 'signup'));
+  document.getElementById('retry-login')?.addEventListener('click', () => window.location.reload());
   // Someone signed in from another tab: load that account here too.
   window.addEventListener('storage', (e) => { if (e.key === ACTIVE_USER_KEY && e.newValue) window.location.reload(); });
   const form = document.getElementById('test-login');
@@ -65,7 +78,10 @@ async function start() {
     if (redirecting || navigator.onLine === false) return;
     redirecting = true;
     try { await auth.login(); }
-    catch { redirecting = false; }
+    catch (e) {
+      redirecting = false;
+      if (!window.__dash) signInScreen(auth,e.message || 'Sign-in could not start. Try again.');
+    }
   };
 
   if (!auth.user) {

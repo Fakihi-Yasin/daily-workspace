@@ -228,3 +228,14 @@ test('calendar and saved views: due this week, overdue, by category (Exams)', as
   await r('PUT', '/api/workspace/layout', { views });
   assert.ok((await r('GET', '/api/workspace')).layout.views.some(v => v.name === 'Assignments due'));
 });
+
+test('personal task creation stores its optional subtasks atomically and reloads them', async () => {
+  const be = backend('auth0|draft-subtasks');
+  const r = req(be);
+  const t = await r('POST','/api/todos',{title:'Personal checklist',subtasks:['First','Second']});
+  assert.deepEqual(t.subtasks.map(s=>s.title),['First','Second']);
+  await assert.rejects(r('POST','/api/todos',{title:'Invalid personal task',subtasks:['Valid','']}), /Use up to 30 subtasks/);
+  const after = await req(reload(be))('GET','/api/today');
+  assert.ok(!after.todos.some(t=>t.title==='Invalid personal task'));
+  assert.deepEqual(after.todos.find(x=>x.id===t.id).subtasks.map(s=>s.title),['First','Second']);
+});

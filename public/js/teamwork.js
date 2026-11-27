@@ -2,7 +2,7 @@
 // Data lives in the shared Supabase tables (never in personal snapshots) and every read and write
 // goes through database functions that check role, blocked status and team membership. The
 // permission checks below only decide which buttons to show.
-import { html, useState, useEffect, useRef, useCallback, useResource, Icon, Chip, Modal, Empty, TaskText, toast, fmtDay, fmtShort, addDays, pct, bus, Avatar, ActionsMenu, useFiveRows } from './lib.js';
+import { html, useState, useEffect, useRef, useCallback, useResource, Icon, Chip, Modal, Empty, TaskText, toast, fmtDay, fmtShort, addDays, pct, bus, Avatar, ActionsMenu, useFiveRows, SubtaskDraft, subtaskTitles, ConfirmDeleteTask, firstLine } from './lib.js';
 
 export const rpc = (name, args) => window.__dash.rpc(name, args);
 
@@ -162,15 +162,51 @@ function TeamLanding() {
 }
 
 // ---------- one team ----------
+const teamLocation = () => new URLSearchParams(location.hash.split('?')[1] || '');
+const teamTab = () => TABS.some(([key]) => key === teamLocation().get('tab')) ? teamLocation().get('tab') : 'board';
+const completedOn = (task, ctx, date = ctx.today) => task.status === 'done' && task.completed_at &&
+  new Intl.DateTimeFormat('sv-SE', { timeZone: ctx.tz || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(task.completed_at)) === date;
+
+export function RemarkNotifications() {
+  const { data, reload } = useRpc('team_remark_notifications', {});
+  const count = (data || []).reduce((total, thread) => total + thread.unread, 0);
+  const details = useRef(null);
+  useEffect(() => {
+    addEventListener('focus', reload);
+    return () => removeEventListener('focus', reload);
+  }, [reload]);
+  if (!count) return null;
+  return html`<details class="remark-notifications" ref=${details}>
+    <summary><${Icon} name="note" size=${16} />Unread remarks <span class="team-badge">${count}</span></summary>
+    <ul>${data.map(thread => html`<li key=${thread.id}>
+      <a href=${'#/teams/' + thread.team_id + '?tab=remarks&thread=' + thread.id}
+        onClick=${() => { details.current.open = false; }}>
+        <strong>${firstLine(thread.title)}</strong><span class="small muted">${thread.team_name} · ${thread.unread} unread</span>
+      </a>
+    </li>`)}</ul>
+  </details>`;
+}
+
 const TABS = [['board', 'Board'], ['people', 'People'], ['scores', 'Daily score'], ['future', 'Future projects'], ['routines', 'Routines'], ['remarks', 'Remarks'], ['activity', 'Activity']];
 
 function TeamPage({ id }) {
   const { data, error } = useRpc('team_get', { p_team_id: id });
   const { data: boot } = useResource('/api/bootstrap');
-  // "#/teams/<id>?tab=people" opens a tab directly (used right after creating a team).
-  const [tab, setTab] = useState(() => { const t = (/[?&]tab=(\w+)/.exec(location.hash) || [])[1]; return TABS.some(x => x[0] === t) ? t : 'board'; });
+  const [tab, setTab] = useState(teamTab);
+  const [thread, setThread] = useState(() => teamLocation().get('thread'));
+  useEffect(() => {
+    const openRoute = () => { setTab(teamTab()); setThread(teamLocation().get('thread')); };
+    addEventListener('hashchange', openRoute);
+    return () => removeEventListener('hashchange', openRoute);
+  }, []);
+  const clearThread = () => {
+    setThread(null);
+    if (teamLocation().has('thread')) history.replaceState(null,'','#/teams/' + id + '?tab=remarks');
+  };
   const selectTab = (next) => {
     setTab(next);
+    setThread(null);
     history.replaceState(null, '', '#/teams/' + id + (next === 'board' ? '' : '?tab=' + next));
   };
   // Opening the board (once its tasks have loaded) clears this team's unread count, and only this one.
@@ -199,7 +235,7 @@ function TeamPage({ id }) {
     <p><a href="#/teams" class="link-btn">← Team Work</a></p>
     <header class="page-head">
       <h1>${data.team.name}</h1>
-      ${me.access === 'owner' ? html`<${Chip} color="solid">Owner<//>` : me.access === 'member' ? html`<${Chip}>Member<//>` : html`<${Chip} color="yellow">Viewing as Super Admin (read-only)<//>`}
+      ${me.access === 'owner' ? html`<${Chip} color="solid">Owner<//>` : me.access === 'member' ? html`<${Chip}>Member<//>` : html`<${Chip} color="yellow">Read-only access<//>`}
       <span class="spacer"></span>
       ${(ctx.owner || isSuper()) && html`<${TeamMenu} team=${{ ...data.team, categories: data.categories }} owner=${ctx.owner} counts=${{ tasks: t.length, members: data.members.length, projects: data.projects.filter(p => !p.moved_at).length }} />`}
     </header>
@@ -208,7 +244,7 @@ function TeamPage({ id }) {
       <div class="tile"><span class="v">${t.filter(k => k.status === 'in_progress').length}</span><span class="k">In progress</span></div>
       <div class=${'tile' + (t.some(k => k.status === 'blocked') ? ' warn' : '')}><span class="v">${t.filter(k => k.status === 'blocked').length}</span><span class="k">Blocked (stuck)</span></div>
       <div class=${'tile' + (overdue ? ' warn' : '')}><span class="v">${overdue}</span><span class="k">Overdue</span></div>
-      <div class="tile"><span class="v">${t.filter(k => k.status === 'done').length}</span><span class="k">Done</span></div>
+      <div class="tile"><span class="v">${t.filter(k => completedOn(k, ctx)).length}</span><span class="k">Done</span></div>
     </div>
     <div class="tabs" role="tablist">${TABS.filter(([k]) => isMember || !['remarks', 'routines'].includes(k)).map(([k, l]) => html`<button role="tab" aria-selected=${tab === k} class=${tab === k ? 'on' : ''} onClick=${() => selectTab(k)}>${l}
       ${k === 'remarks' && unreadRemarks > 0 ? html`<span class="team-badge">${unreadRemarks}</span>` : k === 'people' ? html`<span class="count">${data.members.length}</span>` : k === 'future' ? html`<span class="count">${data.projects.filter(p => !p.moved_at).length}</span>` : ''}</button>`)}</div>
@@ -217,7 +253,7 @@ function TeamPage({ id }) {
     ${tab === 'scores' && html`<${Scores} ctx=${ctx} />`}
     ${tab === 'future' && html`<${Future} ctx=${ctx} />`}
     ${isMember && tab === 'routines' && html`<${TeamRoutines} ctx=${ctx} />`}
-    ${isMember && tab === 'remarks' && html`<${RemarksInbox} ctx=${ctx} inbox=${inbox} />`}
+    ${isMember && tab === 'remarks' && html`<${RemarksInbox} ctx=${ctx} inbox=${inbox} threadId=${thread} clearThread=${clearThread} />`}
     ${tab === 'activity' && html`<${Activity} ctx=${ctx} />`}
   </div>`;
 }
@@ -282,18 +318,27 @@ function Board({ ctx }) {
   const [remarks, setRemarks] = useState(null);
   const [dragging, setDragging] = useState(null);
   const [moving, setMoving] = useState(false);
+  const [optimistic, setOptimistic] = useState(null);
+  const [historyDate, setHistoryDate] = useState(null);
+  useEffect(() => {
+    if (optimistic && ctx.team.tasks.some(k => k.id === optimistic.id && k.status === optimistic.status)) setOptimistic(null);
+  }, [ctx.team.tasks, optimistic]);
   const drag = useRef(null);
   const savingMove = useRef(false);
   const tcats = ctx.team.categories || [];
-  const tasks = ctx.team.tasks.filter(k => (who === 'all' || (who === 'none' ? !k.assignee : k.assignee && k.assignee.id === who))
+  const tasks = ctx.team.tasks.map(k => k.id === optimistic?.id ? { ...k, ...optimistic } : k)
+    .filter(k => (k.status !== 'done' || completedOn(k, ctx)) && (who === 'all' || (who === 'none' ? !k.assignee : k.assignee && k.assignee.id === who))
     && (catF === 'all' || (catF === 'none' ? !k.category_id : k.category_id === catF)));
   const stop = () => { drag.current = null; setDragging(null); };
   const move = async (id, status, before) => {
     if (savingMove.current) return;
     savingMove.current = true;
     setMoving(true);
+    if (ctx.team.tasks.find(k => k.id === id)?.status !== status) {
+      setOptimistic({ id, status, completed_at: status === 'done' ? new Date().toISOString() : null });
+    }
     try { await change('team_task_move', { p_task_id: id, p_status: status, p_before_id: before }); }
-    catch { /* toast shown */ } finally { savingMove.current = false; setMoving(false); }
+    catch { setOptimistic(null); } finally { savingMove.current = false; setMoving(false); }
   };
   return html`<div>
     ${ctx.member && html`<${NewTask} ctx=${ctx} />`}
@@ -301,6 +346,7 @@ function Board({ ctx }) {
       <${PersonPicker} ctx=${ctx} label="Filter by assignee" value=${who} onChange=${setWho} filter />
       ${tcats.length > 0 && html`<label class="row small">Category<select style="width:auto" value=${catF} onChange=${(e) => setCatF(e.target.value)} aria-label="Filter by team category">
         <option value="all">All</option>${tcats.map(c => html`<option value=${c.id}>${c.name}${c.archived ? ' (archived)' : ''}</option>`)}<option value="none">No category</option></select></label>`}
+      <button class="btn sm" onClick=${() => setHistoryDate(ctx.today)}>Team task history</button>
     </div>
     <div class="board">
       ${STATUSES.map(([status, label, color]) => html`<${BoardColumn} key=${status} status=${status} label=${label} color=${color}
@@ -320,6 +366,14 @@ function Board({ ctx }) {
         }}
         onStatus=${move} onEdit=${setEditing} onRemarks=${setRemarks} />`)}
     </div>
+    ${historyDate && html`<${Modal} title="Team task history" onClose=${() => setHistoryDate(null)}>
+      <label class="field">Completion date<input type="date" value=${historyDate}
+        onInput=${e => e.target.value && setHistoryDate(e.target.value)} /></label>
+      <div class="stack">${ctx.team.tasks.filter(k => completedOn(k,ctx,historyDate)).map(k => html`
+        <article class="card flat row wrap" key=${k.id}><strong><${TaskText} text=${k.title} /></strong>
+          <${PersonLabel} person=${k.assignee} me=${ctx.me.id} /></article>`)}</div>
+      ${!ctx.team.tasks.some(k => completedOn(k,ctx,historyDate)) && html`<p class="muted">No tasks completed on this day.</p>`}
+    <//>`}
     ${editing && html`<${TaskModal} ctx=${ctx} task=${editing} onClose=${() => setEditing(null)} />`}
     ${remarks && html`<${RemarksModal} teamId=${ctx.team.team.id} task=${remarks} onClose=${() => setRemarks(null)} />`}
   </div>`;
@@ -372,6 +426,10 @@ function TaskCard({ k, ctx, onDrag, onEnd, onStatus, onEdit, onRemarks }) {
       ${category && html`<${Chip} color=${category.color}>${category.name}<//>`}
       ${k.due_date && html`<${Chip} color=${late ? 'pink' : k.due_date === ctx.today ? 'yellow' : 'ink'} title=${late ? 'Overdue' : 'Due date'}>${late ? 'Overdue · ' : ''}${fmtShort(k.due_date)}<//>`}
     </div>
+    ${k.subtasks?.length > 0 && html`<details class="task-card-subtasks">
+      <summary>${k.subtasks.filter(item => item.done).length}/${k.subtasks.length} subtasks done</summary>
+      <ul>${k.subtasks.map(item => html`<li key=${item.id}>${item.done ? '✓ ' : ''}${item.title}</li>`)}</ul>
+    </details>`}
     <div class="row wrap">
       ${editableStatus && html`<select class="sm-select" aria-label=${'Status of ' + k.title} value=${k.status}
             onChange=${e => onStatus(k.id, e.target.value, null)}>
@@ -435,7 +493,7 @@ function RemarksModal({ teamId, task, thread, onClose }) {
 }
 
 function NewTask({ ctx }) {
-  const [f, set] = useState({ title: '', assignee: ctx.me.id, due: '', status: 'todo', category: '' });
+  const [f, set] = useState({ title: '', assignee: ctx.me.id, due: '', status: 'todo', category: '', subtasks: '' });
   const active = (ctx.team.categories || []).filter(c => !c.archived);
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
@@ -443,8 +501,8 @@ function NewTask({ ctx }) {
     if (!f.title.trim()) return;
     setBusy(true);
     try {
-      await change('team_task_create', { p_team_id: ctx.team.team.id, p_title: f.title.trim(), p_assignee_id: f.assignee || null, p_due_date: f.due || null, p_status: f.status, p_category_id: f.category || null }, 'Task added');
-      set({ ...f, title: '' });
+      await change('team_task_create', { p_team_id: ctx.team.team.id, p_title: f.title.trim(), p_assignee_id: f.assignee || null, p_due_date: f.due || null, p_status: f.status, p_category_id: f.category || null, p_subtasks: subtaskTitles(f.subtasks) }, 'Task added');
+      set({ ...f, title: '', subtasks: '' });
     } catch { /* toast shown */ } finally { setBusy(false); }
   };
   return html`<form class="card flat team-new-task" onSubmit=${submit} aria-label="New team task">
@@ -455,10 +513,12 @@ function NewTask({ ctx }) {
     ${active.length > 0 && html`<select aria-label="Team category" value=${f.category} onChange=${(e) => set({ ...f, category: e.target.value })}>
       <option value="">No category</option>${active.map(c => html`<option value=${c.id}>${c.name}</option>`)}</select>`}
     <button class="btn primary" disabled=${busy || !f.title.trim()}><${Icon} name="plus" size=${16} />Add</button>
+    <${SubtaskDraft} value=${f.subtasks} onInput=${subtasks => set({ ...f, subtasks })} />
   </form>`;
 }
 
 function TaskModal({ ctx, task, onClose }) {
+  const [deleting, setDeleting] = useState(false);
   const [f, set] = useState({ title: task.title, assignee: task.assignee ? task.assignee.id : '', due: task.due_date || '', status: task.status, category: task.category_id || '' });
   const catOptions = (ctx.team.categories || []).filter(c => !c.archived || c.id === task.category_id);
   const save = async (e) => {
@@ -470,9 +530,9 @@ function TaskModal({ ctx, task, onClose }) {
     } catch { /* toast shown */ }
   };
   const del = async () => {
-    if (!confirm('Delete this task?')) return;
     try { await change('team_task_delete', { p_task_id: task.id }, 'Task deleted'); onClose(); } catch { /* toast shown */ }
   };
+  if (deleting) return html`<${ConfirmDeleteTask} title=${task.title} onCancel=${() => setDeleting(false)} onDelete=${del} />`;
   return html`<${Modal} title="Edit task" onClose=${onClose}>
     <form class="stack" onSubmit=${save}>
       <label class="field">Title<textarea rows="2" maxlength="500" value=${f.title} onInput=${(e) => set({ ...f, title: e.target.value })} required></textarea></label>
@@ -487,9 +547,10 @@ function TaskModal({ ctx, task, onClose }) {
           <option value="">No category</option>${catOptions.map(c => html`<option value=${c.id}>${c.name}${c.archived ? ' (archived)' : ''}</option>`)}</select></label>
       </div>
       <p class="small muted">Created by ${task.created_by ? task.created_by.name : 'Unknown'} · last change ${fmtWhen(task.updated_at)}</p>
-      <div class="row"><button type="button" class="btn danger" onClick=${del}>Delete</button><span class="spacer"></span>
+      <div class="row"><button type="button" class="btn danger" onClick=${() => setDeleting(true)}>Delete</button><span class="spacer"></span>
         <button type="button" class="btn" onClick=${onClose}>Cancel</button><button class="btn primary">Save</button></div>
     </form>
+    <${TeamChecklist} taskId=${task.id} items=${ctx.team.tasks.find(k => k.id === task.id)?.subtasks || []} />
   <//>`;
 }
 
@@ -732,10 +793,11 @@ function Scores({ ctx }) {
 }
 
 // ---------- future projects ----------
+const canManageProject = (ctx,p) => ctx.owner || (ctx.member && p.created_by === ctx.me.id);
+
 function Future({ ctx }) {
   const [editing, setEditing] = useState(null);
   const [starting, setStarting] = useState(null);
-  const teamId = ctx.team.team.id;
   const planned = ctx.team.projects.filter(p => !p.moved_at);
   const started = ctx.team.projects.filter(p => p.moved_at);
   return html`<div>
@@ -743,25 +805,62 @@ function Future({ ctx }) {
       <${Icon} name="plus" size=${16} />Add future project</button></div>`}
     ${planned.length === 0 ? html`<${Empty} title="No planned projects" />` : html`<div class="stack">${planned.map(p => html`<div class="card flat row wrap" key=${p.id}>
       <div style="flex:1;min-width:200px"><strong>${p.title}</strong>${p.notes && html`<p class="small muted" style="white-space:pre-wrap;margin-top:4px">${p.notes}</p>`}</div>
-      ${ctx.owner && html`<button class="btn sm primary" onClick=${() => setStarting(p)}>Move to active work</button>
-        <button class="icon-btn" aria-label=${'Edit ' + p.title} onClick=${() => setEditing(p)}><${Icon} name="edit" size=${16} /></button>
+      ${ctx.owner && html`<button class="btn sm primary" onClick=${() => setStarting(p)}>Move to active work</button>`}
+      ${canManageProject(ctx,p) && html`<button class="icon-btn" aria-label=${'Edit ' + p.title} onClick=${() => setEditing(p)}><${Icon} name="edit" size=${16} /></button>
         <button class="btn sm danger" onClick=${async () => { if (confirm(`Delete “${p.title}”?`)) await change('team_project_delete', { p_project_id: p.id }, 'Deleted').catch(() => {}); }}>Delete</button>`}
     </div>`)}</div>`}
     ${started.length > 0 && html`<section class="section"><div class="section-head"><h3>Moved to active work</h3></div>
-      <ul class="plain small">${started.map(p => html`<li key=${p.id}><strong>${p.title}</strong> <span class="muted">· ${fmtWhen(p.moved_at)}</span></li>`)}</ul></section>`}
-    ${editing && html`<${ProjectModal} p=${editing} teamId=${teamId} onClose=${() => setEditing(null)} />`}
+      <ul class="plain small">${started.map(p => html`<li key=${p.id}><strong>${p.title}</strong> <span class="muted">· ${fmtWhen(p.moved_at)}</span>
+        ${canManageProject(ctx,p) && html`<button class="btn sm" onClick=${() => setEditing(p)}>Manage</button>
+          <button class="btn sm danger" onClick=${async () => { if (confirm(`Delete “${p.title}”?`)) await change('team_project_delete', { p_project_id: p.id }, 'Deleted').catch(() => {}); }}>Delete</button>`}
+      </li>`)}</ul></section>`}
+    ${editing && html`<${ProjectModal} p=${editing} ctx=${ctx} onClose=${() => setEditing(null)} />`}
     ${starting && html`<${StartModal} p=${starting} ctx=${ctx} onClose=${() => setStarting(null)} />`}
   </div>`;
 }
 
-function ProjectModal({ p, teamId, onClose }) {
+function ProjectModal({ p, ctx, onClose }) {
+  const teamId = ctx.team.team.id;
   const [f, set] = useState({ title: p.title, notes: p.notes || '' });
   return html`<${Modal} title=${p.id ? 'Edit future project' : 'Add future project'} onClose=${onClose}>
     <form class="stack" onSubmit=${async (e) => { e.preventDefault(); try { await change('team_project_save', { p_team_id: teamId, p_project_id: p.id || null, p_title: f.title, p_notes: f.notes }, p.id ? 'Saved' : 'Project added'); onClose(); } catch { /* toast */ } }}>
       <label class="field">Title<input type="text" maxlength="200" required value=${f.title} onInput=${(e) => set({ ...f, title: e.target.value })} /></label>
       <label class="field">Notes<textarea rows="3" maxlength="2000" value=${f.notes} onInput=${(e) => set({ ...f, notes: e.target.value })}></textarea></label>
       <div class="row"><span class="spacer"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button class="btn primary">Save</button></div>
-    </form><//>`;
+    </form>
+    ${p.id && html`<${TeamChecklist} projectId=${p.id} items=${ctx.team.projects.find(item => item.id === p.id)?.subtasks || []} />`}
+  <//>`;
+}
+
+function TeamChecklist({ projectId, taskId, items }) {
+  const [draft, setDraft] = useState('');
+  const [edit, setEdit] = useState(null);
+  const call = async (p_item_id, patch) => {
+    try {
+      await change('team_checklist_change', { p_project_id: projectId || null, p_task_id: taskId || null, p_item_id, ...patch });
+      return true;
+    } catch { return false; }
+  };
+  return html`<section class="stack team-checklist" aria-label="Subtasks">
+    <h4>Subtasks</h4>
+    ${items.map(item => html`<div class="row wrap" key=${item.id}>
+      ${edit?.id === item.id ? html`<form class="row wrap" onSubmit=${async e => {
+        e.preventDefault(); if (await call(item.id, { p_title: edit.title })) setEdit(null);
+      }}>
+        <input aria-label="Rename subtask" required maxlength="500" value=${edit.title} onInput=${e => setEdit({ ...edit, title: e.target.value })} />
+        <button class="btn sm">Save name</button><button type="button" class="btn sm" onClick=${() => setEdit(null)}>Cancel</button>
+      </form>` : html`<label class="row"><input type="checkbox" checked=${item.done}
+          onChange=${async e => { const input=e.currentTarget; if (!(await call(item.id,{ p_done: input.checked }))) input.checked=item.done; }} />${item.title}</label>
+        <button type="button" class="btn sm" onClick=${() => setEdit(item)}>Rename</button>
+        <button type="button" class="btn sm" onClick=${() => call(item.id, { p_remove: true })}>Remove</button>`}
+    </div>`)}
+    <form class="row wrap" onSubmit=${async e => {
+      e.preventDefault(); if (draft.trim() && await call(null, { p_title: draft })) setDraft('');
+    }}>
+      <input aria-label="New subtask" maxlength="500" placeholder="New subtask" value=${draft} onInput=${e => setDraft(e.target.value)} />
+      <button class="btn sm" disabled=${!draft.trim()}>Add subtask</button>
+    </form>
+  </section>`;
 }
 
 function StartModal({ p, ctx, onClose }) {
@@ -808,9 +907,10 @@ function Activity({ ctx }) {
   })}</ol>`;
 }
 
-function RemarksInbox({ ctx, inbox }) {
+function RemarksInbox({ ctx, inbox, threadId, clearThread }) {
   const [open, setOpen] = useState(null);
   const [task, setTask] = useState(null);
+  const thread = open || inbox.data?.find(r => r.id === threadId);
   return html`<section class="stack">
     <div class="row"><button class="btn primary" onClick=${() => setOpen({})}>New remark</button></div>
     ${inbox.error ? html`<p role="alert">${inbox.error}</p>` : !inbox.data ? html`<p>Loading…</p>`
@@ -825,7 +925,8 @@ function RemarksInbox({ ctx, inbox }) {
           ${r.task_title && html`<button class="btn sm linked-task" title=${r.task_title}
             onClick=${() => setTask(ctx.team.tasks.find(t => t.id === r.task_id))}>${r.task_title}</button>`}</div>
       </article>`)}
-    ${open && html`<${RemarksModal} teamId=${ctx.team.team.id} thread=${open} onClose=${() => setOpen(null)} />`}
+    ${thread && html`<${RemarksModal} key=${thread.id || 'new'} teamId=${ctx.team.team.id} thread=${thread}
+      onClose=${() => { setOpen(null); clearThread(); }} />`}
     ${task && (canEdit(ctx, task) ? html`<${TaskModal} ctx=${ctx} task=${task} onClose=${() => setTask(null)} />`
       : html`<${Modal} title="Team task" onClose=${() => setTask(null)}>
           <div class="stack"><strong><${TaskText} text=${task.title} /></strong>

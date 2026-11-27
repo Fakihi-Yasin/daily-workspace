@@ -723,8 +723,6 @@ main { padding-bottom: 32px; }
 
 /* ---------- roles, Team Work, Users ---------- */
 .gate-who { margin: 0; font-size: 14px; }
-.account-role { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #9fe39f; }
-@media (max-width: 1100px) { .account-role { display: none; } }
 .table-wrap { overflow-x: auto; }
 .sm-select { width: auto; min-height: 30px; padding: 2px 8px; font-size: 13px; }
 .tile.warn { border-color: var(--pink); background: var(--pink-soft); }
@@ -940,3 +938,13 @@ kbd { font: 600 12px/1 ui-monospace, monospace; padding: 2px 6px; border: 1px so
   .team-new-task .person-picker { flex: 1 1 180px; max-width: 100%; }
   .team-new-task .team-task-date { flex-basis: 140px; width: 140px; }
 }
+
+.subtask-draft { flex: 1 0 100%; width: 100%; margin-top: 5px; }
+.subtask-draft summary, .task-card-subtasks summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
+.subtask-draft .field, .team-checklist { margin-top: 8px; }
+.team-checklist input:not([type=checkbox]) { flex: 1 1 180px; min-width: 0; width: auto; }
+.task-card-subtasks ul { margin: 4px 0; padding-inline-start: 18px; overflow-wrap: anywhere; }
+.remark-notifications { margin-block-end: 10px; }
+.remark-notifications summary { cursor: pointer; width: fit-content; display: flex; align-items: center; gap: 6px; }
+.remark-notifications ul { padding: 0; margin: 8px 0; list-style: none; max-height: 280px; overflow-y: auto; }
+.remark-notifications a { display: grid; gap: 2px; padding: 6px 0; overflow-wrap: anywhere; }

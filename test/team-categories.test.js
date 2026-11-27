@@ -182,3 +182,36 @@ test('team routines preserve assignment and create one occurrence per date on re
   assert.deepEqual((await cards()).map(t=>t.due_date).sort(),['2026-11-27','2026-12-04','2026-12-11']);
   await refused(call('OUT','team_routines',{p_team_id:team}),/Team not found/);
 });
+
+test('project creator, owner and assignee manage checklists within their authorized context', async () => {
+  const team = (await call('OWN','team_create',{p_name:'Project checklist test'})).id;
+  for (const [account,email] of [['MEM','mem@example.test'],['OUT','out@example.test']]) {
+    const inv = await call('OWN','team_invite_create',{p_team_id:team,p_email:email});
+    await call(account,'my_invite_accept',{p_invite_id:inv.id});
+  }
+  const project = (await call('MEM','team_project_save',{p_team_id:team,p_project_id:null,p_title:'Member project',p_notes:null})).id;
+  const item = (await call('MEM','team_checklist_change',{p_project_id:project,p_task_id:null,p_item_id:null,p_title:'Plan'})).id;
+  const remove = (await call('MEM','team_checklist_change',{p_project_id:project,p_task_id:null,p_item_id:null,p_title:'Remove me'})).id;
+  await call('MEM','team_checklist_change',{p_project_id:project,p_task_id:null,p_item_id:remove,p_remove:true});
+  await call('OWN','team_checklist_change',{p_project_id:project,p_task_id:null,p_item_id:item,p_title:'Plan renamed',p_done:true});
+  await refused(call('OUT','team_checklist_change',{p_project_id:project,p_task_id:null,p_item_id:item,p_remove:true}),/project creator or team owner/);
+  await refused(call('OUT','team_project_delete',{p_project_id:project}),/project creator or team owner/);
+  const active = (await call('OWN','team_project_activate',{p_project_id:project,p_assignee_id:OUT})).task_id;
+  let board = await call('MEM','team_get',{p_team_id:team});
+  assert.deepEqual(board.tasks.find(t=>t.id===active).subtasks,[{id:item,title:'Plan renamed',done:true}]);
+  assert.deepEqual(board.projects.find(p=>p.id===project).subtasks,[{id:item,title:'Plan renamed',done:true}]);
+  await call('MEM','team_checklist_change',{p_project_id:project,p_task_id:null,p_item_id:item,p_done:false});
+  await call('MEM','team_project_delete',{p_project_id:project});
+  board = await call('MEM','team_get',{p_team_id:team});
+  assert.equal(board.tasks.find(t=>t.id===active).subtasks[0].done,false);
+  const task = (await call('MEM','team_task_create',{p_team_id:team,p_title:'Team subtasks',p_subtasks:['One','Two']})).id;
+  assert.deepEqual((await call('MEM','team_get',{p_team_id:team})).tasks.find(t=>t.id===task).subtasks.map(x=>x.title),['One','Two']);
+  await refused(call('MEM','team_task_create',{p_team_id:team,p_title:'Invalid',p_subtasks:[null]}),/Use up to 30 subtasks/);
+  assert.ok(!(await call('MEM','team_get',{p_team_id:team})).tasks.some(t=>t.title==='Invalid'));
+  const root = (await call('OWN','team_remark_add',{p_task_id:task,p_body:'Read from outside tab',p_urgent:true})).id;
+  const notifications = await call('MEM','team_remark_notifications');
+  assert.ok(notifications.some(r=>r.id===root && r.team_id===team && r.title==='Team subtasks'));
+  assert.ok(!(await call('SA','team_remark_notifications')).some(r=>r.id===root));
+  await call('MEM','team_remark_read',{p_team_id:team,p_ids:[root]});
+  assert.ok(!(await call('MEM','team_remark_notifications')).some(r=>r.id===root));
+});

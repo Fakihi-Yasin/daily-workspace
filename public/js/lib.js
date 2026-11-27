@@ -425,3 +425,28 @@ export function useFiveRows() {
   });
   return ref;
 }
+
+export const subtaskTitles = (text) => text.split('\n').map(line => line.trim()).filter(Boolean);
+export function SubtaskDraft({ value, onInput }) {
+  return html`<details class="subtask-draft"><summary>Add subtasks (optional)</summary>
+    <label class="field">Subtasks, one per line
+      <textarea rows="3" maxlength="15030" value=${value} onInput=${e => onInput(e.target.value)}></textarea>
+    </label>
+  </details>`;
+}
+
+export function ConfirmDeleteTask({ title, onCancel, onDelete }) {
+  const [busy, setBusy] = useState(false);
+  return html`<${Modal} title="Delete task?" onClose=${() => { if (!busy) onCancel(); }}>
+    <div class="stack">
+      <p><strong><${TaskText} text=${title} /></strong></p>
+      <div class="row"><span class="spacer"></span>
+        <button class="btn" disabled=${busy} onClick=${onCancel}>Cancel</button>
+        <button class="btn danger-solid" disabled=${busy} onClick=${async () => {
+          setBusy(true);
+          try { await onDelete(); } finally { setBusy(false); }
+        }}>${busy ? 'Deleting…' : 'Delete'}</button>
+      </div>
+    </div>
+  <//>`;
+}

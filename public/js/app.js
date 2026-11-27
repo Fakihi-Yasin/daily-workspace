@@ -7,9 +7,9 @@ import { Formation } from './formation.js';
 import { Challenges } from './challenges.js';
 import { Stats } from './stats.js';
 import { MiniTimer } from './focus.js';
-import { TeamWork, InvitePage, UnreadNavBadge } from './teamwork.js';
+import { TeamWork, InvitePage, UnreadNavBadge, RemarkNotifications } from './teamwork.js';
 import { Profile } from './profile.js';
-import { useWorkspace, navItems, Onboarding, QuickAdd, openQuickAdd, Views } from './workspace.js';
+import { useWorkspace, navItems, Onboarding, QuickAdd, Views } from './workspace.js';
 import { Users } from './users.js';
 
 // Team Work and Users exist only in the synced web build: the database enforces who may use them
@@ -68,7 +68,6 @@ function App() {
       <div class="brand"><i>✓</i><span>Dashboard</span></div>
       ${navRoutes.map(([key, label, icon]) => html`<a class=${'nav-link' + (key === r[0] ? ' on' : '')} href=${'#/' + key} aria-current=${key === r[0] ? 'page' : undefined} title=${label}>
         <${Icon} name=${icon} /><span>${label}</span>${key === 'teams' && html`<${UnreadNavBadge} />`}</a>`)}
-      <button class="nav-link quick-add-btn" onClick=${openQuickAdd} title="Quick add a task (press q)" aria-label="Quick add a task"><${Icon} name="plus" /><span>Quick add</span></button>
       <div class="side-foot">
         <${MiniTimer} />
         <${ThemeToggle} />
@@ -77,7 +76,7 @@ function App() {
         ${window.__dash && html`<${Account} />`}
       </div>
     </nav>
-    <main id="main">${window.__dash && window.__dash.sync && html`<${SyncBanner} />`}<${Page} key=${r[0]} sub=${rest.join('/')} superOnly=${r[0] === 'users'} /></main>
+    <main id="main">${hasTeams() && html`<${RemarkNotifications} />`}${window.__dash && window.__dash.sync && html`<${SyncBanner} />`}<${Page} key=${r[0]} sub=${rest.join('/')} superOnly=${r[0] === 'users'} /></main>
     <${Toasts} />
     <${QuickAdd} />
     <${Onboarding} />
@@ -88,15 +87,14 @@ function Account() {
   const u = window.__dash.user;
   const [, tick] = useState(0);
   useEffect(() => { const f = () => tick(x => x + 1); addEventListener('dash-profile', f); return () => removeEventListener('dash-profile', f); }, []);
-  const profile = window.__dash.profile || { id: u.id, name: u.name || u.email };
-  const identity = html`<${Avatar} p=${profile} size=${30} />
-    <span class="account-text"><span class="account-id">${profile.name}</span>
-      ${u.email && u.email.toLowerCase() !== (profile.name || '').trim().toLowerCase()
-        && html`<span class="account-id small">${u.email}</span>`}</span>`;
+  const profile = window.__dash.profile;
+  const name = [profile?.display_name, profile?.name, u.name]
+    .find(value => value?.trim() && !value.includes('@'))?.trim() || 'My profile';
+  const identity = html`<${Avatar} p=${{ ...profile, id: u.id, name }} size=${30} />
+    <span class="account-text"><span class="account-id">${name}</span></span>`;
   return html`<div class="account">
     ${hasTeams() ? html`<a class="account-link" href="#/profile" title="Your profile (name and photo)">${identity}</a>`
       : html`<div class="account-link">${identity}</div>`}
-    ${window.__dash.role && html`<span class="account-role">${window.__dash.role === 'super_admin' ? 'Super Admin' : window.__dash.role === 'admin' ? 'Admin' : 'User'}</span>`}
     <button class="account-out" onClick=${() => window.__dash.logout()} title="Sign out" aria-label="Sign out"><${Icon} name="logout" size=${16} /><span>Sign out</span></button>
   </div>`;
 }

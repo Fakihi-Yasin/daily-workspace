@@ -56,7 +56,7 @@ export async function createAuth({ domain, clientId, audience, resume }) {
     sessionExpired,
     // Offer Google’s photo as an option. Profile settings control whether teammates see it.
     user: user && user.sub ? { id: user.sub, email: user.email || '', name: user.name || user.email || '', picture: user.sub.startsWith('google-oauth2|') && typeof user.picture === 'string' ? user.picture : '' } : null,
-    login: (opts = {}) => client.loginWithRedirect({ appState: { hash: window.location.hash }, ...(opts.signup ? { authorizationParams: { screen_hint: 'signup' } } : {}) }),
+    login: (opts = {}) => client.loginWithRedirect({ appState: { hash: opts.hash ?? window.location.hash }, ...(opts.signup ? { authorizationParams: { screen_hint: 'signup' } } : {}) }),
     getToken,
     logout: () => client.logout({ logoutParams: { returnTo: window.location.origin + '/' } }),
   };

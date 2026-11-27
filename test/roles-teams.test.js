@@ -263,7 +263,9 @@ test('daily team score: due that day and done by the end of it; completions coun
 test('Future Projects: members can add them and the owner manages them', async () => {
   const draft = await call('B', 'team_project_save', { p_team_id: TA, p_project_id: null, p_title: 'Member draft', p_notes: null });
   assert.ok((await call('A', 'team_get', { p_team_id: TA })).projects.some(p => p.id === draft.id));
-  await refused(call('B', 'team_project_save', { p_team_id: TA, p_project_id: draft.id, p_title: 'Edit', p_notes: null }), /Only the team owner/);
+  await call('B', 'team_project_save', { p_team_id: TA, p_project_id: draft.id, p_title: 'Member renamed draft', p_notes: null });
+  assert.equal((await call('A', 'team_get', { p_team_id: TA })).projects.find(p => p.id === draft.id).title, 'Member renamed draft');
+  await call('B', 'team_project_delete', { p_project_id: draft.id });
   const p = (await call('A', 'team_project_save', { p_team_id: TA, p_project_id: null, p_title: 'Spanish site', p_notes: 'After summer' })).id;
   await call('A', 'team_project_save', { p_team_id: TA, p_project_id: p, p_title: 'Spanish site (ES)', p_notes: 'After summer' });
   await refused(call('B', 'team_project_activate', { p_project_id: p, p_assignee_id: B }), /Only the team owner/);

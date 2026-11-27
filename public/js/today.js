@@ -1,5 +1,5 @@
 // "Today": the routine checklist first, with a compact focus panel and a right column (score, next action, sessions).
-import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, Modal, AutoGrow, TaskText, firstLine, fmtDay, fmtShort, addDays, fmtDur, pct , useFiveRows } from './lib.js';
+import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, Modal, AutoGrow, TaskText, firstLine, fmtDay, fmtShort, addDays, fmtDur, pct, useFiveRows, SubtaskDraft, subtaskTitles, ConfirmDeleteTask } from './lib.js';
 import { PcTimeCard } from './pctime.js';
 import { FocusPanel, requestStart } from './focus.js';
 import { CompletedModal } from './history.js';
@@ -7,8 +7,6 @@ import { useWorkspace, homeSections, HOME_LABELS, CustomizeModal, CalendarSectio
 
 const CAT_COLORS = ['blue', 'pink', 'mint', 'yellow', 'sky'];
 const catColor = (name, all) => CAT_COLORS[Math.max(0, all.indexOf(name)) % CAT_COLORS.length];
-const SETTLE_MS = 6000; // a completed row stays in place this long (undo window) before moving to "Completed"
-const isClosed = (t) => t.status === 'reported' || (t.progress.scoreTarget > 0 && t.progress.complete) || t.progress.scoreTarget === 0;
 
 // The viewed date lives in the URL (#/today?date=YYYY-MM-DD), so Stats can open a specific day.
 const dateFromHash = () => { const d = new URLSearchParams(location.hash.split('?')[1] || '').get('date'); return /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : null; };
@@ -26,45 +24,21 @@ export function Today() {
   const [over, setOver] = useState({}); // optimistic marks: key -> bool
   const [todoOver, setTodoOver] = useState({}); // optimistic one-off task changes: id -> { done } | { gone: true }
   const [pending, setPending] = useState([]); // one-off tasks being saved
-  const [overdueShown, setOverdueShown] = useState(null); // { date, ids:Set } — rows laid out in "Overdue" (settles after the undo window)
-  const [settled, setSettled] = useState(null); // { date, ids:Set } — which tasks are laid out as completed
   const [doneOpen, setDoneOpen] = useState(() => { try { return localStorage.getItem('completedOpen') !== '0'; } catch { return true; } });
   useEffect(() => { setOver({}); setTodoOver({}); setPending([]); }, [data]);
-  // An overdue task marked done stays in the Overdue list during the undo window, then moves down.
-  useEffect(() => {
-    if (!data) return;
-    const ids = new Set(data.todos.filter(t => t.overdue && !t.done_for_day).map(t => t.id));
-    if (!overdueShown || overdueShown.date !== data.date) { setOverdueShown({ date: data.date, ids }); return; }
-    const added = [...ids].filter(i => !overdueShown.ids.has(i));
-    if (added.length) { setOverdueShown({ date: data.date, ids: new Set([...overdueShown.ids, ...added]) }); }
-    const t = setTimeout(() => setOverdueShown({ date: data.date, ids }), SETTLE_MS);
-    return () => clearTimeout(t);
-  }, [data]);
-  // Rows move between "to do" and "completed" only after the undo window, never under the cursor.
-  useEffect(() => {
-    if (!data) return;
-    const ids = new Set(data.tasks.filter(isClosed).map(t => t.id));
-    if (!settled || settled.date !== data.date) { setSettled({ date: data.date, ids }); return; }
-    const same = ids.size === settled.ids.size && [...ids].every(i => settled.ids.has(i));
-    if (same) return;
-    const t = setTimeout(() => setSettled({ date: data.date, ids }), SETTLE_MS);
-    return () => clearTimeout(t);
-  }, [data]);
-
   if (error && !data) return html`<${Empty} title="Could not load the day">${error}</${Empty}>`;
-  if (!data || !settled) return html`<div class="muted">Loading…</div>`;
+  if (!data) return html`<div class="muted">Loading…</div>`;
 
   const isToday = data.date === data.today;
   const assets = new Map(data.assets.map(a => [a.id, a]));
   const cats = [...new Set(data.tasks.map(t => t.category))];
   const todos = [...data.todos.filter(t => !(todoOver[t.id] && todoOver[t.id].gone)).map(t => (todoOver[t.id] ? { ...t, ...todoOver[t.id] } : t)), ...pending];
-  const overdueIds = overdueShown && overdueShown.date === data.date ? overdueShown.ids : new Set();
   const cancelled = (data.cancelled || []).filter(t => !(todoOver[t.id] && todoOver[t.id].gone));
-  const ctx = { data, assets, over, setOver, isToday, todos, setTodoOver, setPending, overdueIds, cancelled, askDone: setAskDone, cats: (boot && boot.categories) || [], sites: !w || w.layout.sites };
+  const ctx = { data, assets, over, setOver, isToday, todos, setTodoOver, setPending, cancelled, askDone: setAskDone, openHistory: () => setShowDone(true), cats: (boot && boot.categories) || [], sites: !w || w.layout.sites };
   const count = liveCount(ctx);
-  const doneIds = settled.date === data.date ? settled.ids : new Set();
-  const openTasks = data.tasks.filter(t => !doneIds.has(t.id));
-  const doneTasks = data.tasks.filter(t => doneIds.has(t.id));
+  const closed = t => t.status === 'reported' || liveDone(ctx, t).scoreDone >= t.progress.scoreTarget;
+  const openTasks = data.tasks.filter(t => !closed(t));
+  const doneTasks = data.tasks.filter(closed);
   const countIn = (cat) => data.tasks.filter(t => t.category === cat).length;
   const toggleDone = () => { const v = !doneOpen; setDoneOpen(v); try { localStorage.setItem('completedOpen', v ? '1' : '0'); } catch { /* ignore */ } };
 
@@ -200,10 +174,13 @@ async function deleteTodo(ctx, t) {
 function MyTasks({ ctx }) {
   const [title, setTitle] = useState('');
   const [cat, setCat] = useState('');
+  const [subtasks, setSubtasks] = useState('');
+  const [showCompleted, setShowCompleted] = useState(true);
   const [showCancelled, setShowCancelled] = useState(false);
-  const overdue = ctx.todos.filter(t => ctx.overdueIds.has(t.id)).sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  const overdue = ctx.todos.filter(t => t.overdue && !t.done).sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
   const overdueList = useFiveRows();
-  const rest = ctx.todos.filter(t => !ctx.overdueIds.has(t.id));
+  const rest = ctx.todos.filter(t => !t.overdue && !t.done);
+  const completed = ctx.todos.filter(t => t.done && t.done_on === ctx.data.date);
   const done = ctx.todos.filter(t => t.done_for_day).length;
   // One entry = ONE task: new lines and bullets are formatting inside its title.
   const add = async (e) => {
@@ -212,9 +189,11 @@ function MyTasks({ ctx }) {
     if (!v) return;
     const temp = { id: 'tmp-' + Date.now(), date: ctx.data.date, title: v, done: 0, done_for_day: 0, temp: true };
     ctx.setPending(p => [...p, temp]);
+    const drafts = subtaskTitles(subtasks);
+    setSubtasks('');
     setTitle(''); // ready for the next one (the category stays picked)
-    try { await api('POST', '/api/todos', { date: ctx.data.date, title: v, category_name: cat.trim() }); bus.emit(); }
-    catch (err) { ctx.setPending(p => p.filter(x => x.id !== temp.id)); toast({ msg: err.message, kind: 'error' }); }
+    try { await api('POST', '/api/todos', { date: ctx.data.date, title: v, category_name: cat.trim(), subtasks: drafts }); bus.emit(); }
+    catch (err) { setTitle(current => current || v); setSubtasks(current => current || drafts.join('\n')); ctx.setPending(p => p.filter(x => x.id !== temp.id)); toast({ msg: err.message, kind: 'error' }); }
   };
   return html`<section class="section routine my-tasks" id="my-tasks" aria-label="My tasks">
     <div class="routine-head">
@@ -229,12 +208,19 @@ function MyTasks({ ctx }) {
         <${CategoryInput} compact value=${cat} onInput=${setCat} cats=${ctx.cats} label="Category for the new task" placeholder="Category (optional)" />
         <button class="btn primary" disabled=${!title.trim()}><${Icon} name="plus" size=${15} />Add task</button>
       </div>
+      <${SubtaskDraft} value=${subtasks} onInput=${setSubtasks} />
     </form>
     ${overdue.length > 0 && html`<div class="overdue-block" role="region" aria-label=${'Overdue, ' + overdue.length + ' task' + (overdue.length === 1 ? '' : 's')}>
       <div class="overdue-head"><${Icon} name="alert" size=${15} /><span>Overdue</span><span class="overdue-count">${overdue.length}</span></div>
       <div class="task-list five-row-list" ref=${overdueList} tabindex="0" aria-label="Overdue tasks">${overdue.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>
     </div>`}
     ${rest.length > 0 && html`<div class="task-list">${rest.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>`}
+    ${completed.length > 0 && html`<section class="done-group" aria-label="Completed tasks">
+      <button class="done-toggle" aria-expanded=${showCompleted} onClick=${() => setShowCompleted(!showCompleted)}>
+        <${Icon} name=${showCompleted ? 'chevD' : 'chevR'} size=${16} />Completed <span class="muted">${completed.length}</span></button>
+      ${showCompleted && html`<div class="task-list">${completed.map(t => html`<${TodoRow} key=${t.id} t=${t} ctx=${ctx} />`)}</div>`}
+    </section>`}
+    <button class="link-btn small" onClick=${ctx.openHistory}>View task history</button>
     ${ctx.cancelled.length > 0 && html`<div class="cancelled-group">
       <button class="done-toggle" aria-expanded=${showCancelled} onClick=${() => setShowCancelled(!showCancelled)}>
         <${Icon} name=${showCancelled ? 'down' : 'chevR'} size=${16} /><span>Cancelled</span><span class="muted">${ctx.cancelled.length}</span></button>
@@ -293,6 +279,7 @@ function TodoRow({ t, ctx }) {
   const [subsOpen, setSubsOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [details, setDetails] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const ref = useRef();
   useOutside(menu, setMenu, ref);
   const cancelled = !!t.cancelled;
@@ -336,11 +323,13 @@ function TodoRow({ t, ctx }) {
           ${cancelled
             ? html`<button class="item" onClick=${() => { setMenu(false); cancelTodo(ctx, t, false); }}><${Icon} name="undo" size=${16} />Reopen task</button>`
             : !t.done && html`<button class="item" onClick=${() => { setMenu(false); cancelTodo(ctx, t, true); }}><${Icon} name="ban" size=${16} />Cancel task</button>`}
-          <button class="item danger" onClick=${() => { setMenu(false); deleteTodo(ctx, t); }}><${Icon} name="x" size=${16} />Delete</button>
+          <button class="item danger" onClick=${() => { setMenu(false); setConfirmDelete(true); }}><${Icon} name="x" size=${16} />Delete</button>
         </div>`}
       </div>
     </div>`}
     ${showSubs && !t.temp && html`<${Subtasks} t=${t} ctx=${ctx} adding=${adding} setAdding=${setAdding} readOnly=${cancelled} />`}
+    ${confirmDelete && html`<${ConfirmDeleteTask} title=${t.title} onCancel=${() => setConfirmDelete(false)}
+      onDelete=${async () => { setConfirmDelete(false); await deleteTodo(ctx,t); }} />`}
     ${details && html`<${TodoDetails} t=${t} ctx=${ctx} onClose=${() => setDetails(false)} />`}
   </div>`;
 }

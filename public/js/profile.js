@@ -31,6 +31,7 @@ export function Profile() {
   const [preview, setPreview] = useState(null);
   if (!p) return html`<div><header class="page-head"><h1>Profile</h1></header><p class="muted">Profiles need cloud sync.</p></div>`;
   const google = d.user && d.user.picture;
+  const role = { super_admin: 'Super Admin', admin: 'Admin', user: 'User' }[d.role];
   const apply = (next, msg) => {
     forgetPhoto(next.id);
     d.profile = next; setP(next); setPreview(null);
@@ -57,6 +58,7 @@ export function Profile() {
   return html`<div>
     <header class="page-head"><h1>Profile</h1><span class="muted">How you appear to your teammates.</span></header>
     <div class="card profile-card">
+      ${role && html`<p class="small muted">Account role · <strong>${role}</strong></p>`}
       <div class="profile-photo">
         <${Avatar} p=${{ ...p, name: shownName }} size=${96} src=${preview} />
         <div class="stack" style="gap:8px">

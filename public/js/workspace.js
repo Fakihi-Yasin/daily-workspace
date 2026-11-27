@@ -2,7 +2,7 @@
 // setups, the Customize dialog, a category field you can type a new category into, the Calendar and
 // Projects sections, Quick Add (any page) and Saved views. Everything is stored in the account's own
 // dashboard (private, synced across its devices, never shared with teams). See lib/workspace.js.
-import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Chip, Modal, Empty, fmtDay, fmtShort, addDays, firstLine } from './lib.js';
+import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Chip, Modal, Empty, fmtDay, fmtShort, addDays, firstLine, SubtaskDraft, subtaskTitles } from './lib.js';
 
 // ---------- the account's layout ----------
 export const HOME_LABELS = {
@@ -176,16 +176,14 @@ export function QuickAdd() {
       if (document.querySelector('.modal-back, [role=dialog]')) return;
       e.preventDefault(); setOpen(true);
     };
-    const ev = () => setOpen(true);
-    addEventListener('keydown', key); addEventListener('dash-quick-add', ev);
-    return () => { removeEventListener('keydown', key); removeEventListener('dash-quick-add', ev); };
+    addEventListener('keydown', key);
+    return () => removeEventListener('keydown', key);
   }, []);
   return open ? html`<${QuickAddModal} onClose=${() => setOpen(false)} />` : null;
 }
-export const openQuickAdd = () => dispatchEvent(new CustomEvent('dash-quick-add'));
 function QuickAddModal({ onClose }) {
   const { data: boot } = useResource('/api/bootstrap');
-  const [f, set] = useState({ title: '', date: '', cat: '', repeat: '' });
+  const [f, set] = useState({ title: '', date: '', cat: '', repeat: '', subtasks: '' });
   const [busy, setBusy] = useState(false);
   const ref = useRef();
   useEffect(() => { setTimeout(() => ref.current && ref.current.focus(), 30); }, []);
@@ -195,7 +193,7 @@ function QuickAddModal({ onClose }) {
     if (!f.title.trim()) return;
     setBusy(true);
     try {
-      await api('POST', '/api/todos', { title: f.title.trim(), date: f.date || today, category_name: f.cat.trim(), repeat: f.repeat });
+      await api('POST', '/api/todos', { title: f.title.trim(), date: f.date || today, category_name: f.cat.trim(), repeat: f.repeat, subtasks: subtaskTitles(f.subtasks) });
       bus.emit();
       toast({ msg: `Added${f.date && f.date !== today ? ' for ' + fmtShort(f.date) : ''}: ${firstLine(f.title).slice(0, 50)}` });
       onClose();
@@ -209,6 +207,7 @@ function QuickAddModal({ onClose }) {
         <label class="field">Repeat<select value=${f.repeat} onChange=${(e) => set({ ...f, repeat: e.target.value })}>${REPEAT_LABELS.map(([v, l]) => html`<option value=${v}>${l}</option>`)}</select></label>
       </div>
       <${CategoryInput} value=${f.cat} onInput=${(v) => set({ ...f, cat: v })} cats=${boot && boot.categories} />
+      <${SubtaskDraft} value=${f.subtasks} onInput=${subtasks => set({ ...f, subtasks })} />
       ${f.repeat && html`<p class="small muted">When you mark it done, the next one is scheduled automatically.</p>`}
       <div class="row"><span class="small muted">Tip: press <kbd>q</kbd> on any page.</span><span class="spacer"></span>
         <button type="button" class="btn" onClick=${onClose}>Cancel</button><button class="btn primary" disabled=${busy || !f.title.trim()}>Add task</button></div>
