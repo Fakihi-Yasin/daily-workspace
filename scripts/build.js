@@ -7,6 +7,7 @@
 // used or needed). The build fails without them, so an unprotected dashboard can't be produced.
 // `npm run build:test` builds dist-test/ with a fake identity provider for automated tests only;
 // that provider is refused for dist/ and for any build running on Vercel.
+const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const esbuild = require('esbuild');
@@ -117,6 +118,8 @@ const csp = [
   "form-action 'self'",
 ].join('; ');
 
+const assetVersion = (name) => createHash('sha256')
+  .update(fs.readFileSync(path.join(outdir, 'assets', name))).digest('hex').slice(0, 12);
 fs.writeFileSync(path.join(outdir, 'index.html'), `<!doctype html>
 <html lang="en">
 <head>
@@ -126,13 +129,13 @@ fs.writeFileSync(path.join(outdir, 'index.html'), `<!doctype html>
   <meta name="robots" content="noindex, nofollow" />
   <title>Today · Dashboard</title>
   <link rel="icon" href="/favicon.svg?v=green" type="image/svg+xml" />
-  <link rel="stylesheet" href="/assets/styles.css" />
-  <script src="/assets/boot.js"></script>
+  <link rel="stylesheet" href="/assets/styles.css?v=${assetVersion('styles.css')}" />
+  <script src="/assets/boot.js?v=${assetVersion('boot.js')}"></script>
 </head>
 <body>
   <div id="app"></div>
   <noscript>Enable JavaScript to use the dashboard.</noscript>
-  <script type="module" src="/assets/app.js"></script>
+  <script type="module" src="/assets/app.js?v=${assetVersion('app.js')}"></script>
 </body>
 </html>
 `);

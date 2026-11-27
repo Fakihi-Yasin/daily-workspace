@@ -68,6 +68,7 @@ function App() {
       <div class="brand"><i>✓</i><span>Dashboard</span></div>
       ${navRoutes.map(([key, label, icon]) => html`<a class=${'nav-link' + (key === r[0] ? ' on' : '')} href=${'#/' + key} aria-current=${key === r[0] ? 'page' : undefined} title=${label}>
         <${Icon} name=${icon} /><span>${label}</span>${key === 'teams' && html`<${UnreadNavBadge} />`}</a>`)}
+      ${hasTeams() && !(route === 'teams' && rest.length) && html`<${RemarkNotifications} />`}
       <div class="side-foot">
         <${MiniTimer} />
         <${ThemeToggle} />
@@ -76,7 +77,7 @@ function App() {
         ${window.__dash && html`<${Account} />`}
       </div>
     </nav>
-    <main id="main">${hasTeams() && !(route === 'teams' && rest.length) && html`<${RemarkNotifications} />`}${window.__dash && window.__dash.sync && html`<${SyncBanner} />`}<${Page} key=${r[0]} sub=${rest.join('/')} superOnly=${r[0] === 'users'} /></main>
+    <main id="main">${window.__dash && window.__dash.sync && html`<${SyncBanner} />`}<${Page} key=${r[0]} sub=${rest.join('/')} superOnly=${r[0] === 'users'} /></main>
     <${Toasts} />
     <${QuickAdd} />
     <${Onboarding} />

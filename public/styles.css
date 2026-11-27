@@ -937,10 +937,6 @@ kbd { font: 600 12px/1 ui-monospace, monospace; padding: 2px 6px; border: 1px so
 .subtask-draft .field, .team-checklist { margin-top: 8px; }
 .team-checklist input:not([type=checkbox]) { flex: 1 1 180px; min-width: 0; width: auto; }
 .task-card-subtasks ul { margin: 4px 0; padding-inline-start: 18px; overflow-wrap: anywhere; }
-.remark-notifications { margin-block-end: 10px; }
-.remark-notifications summary { cursor: pointer; width: fit-content; display: flex; align-items: center; gap: 6px; }
-.remark-notifications ul { padding: 0; margin: 8px 0; list-style: none; max-height: 280px; overflow-y: auto; }
-.remark-notifications a { display: grid; gap: 2px; padding: 6px 0; overflow-wrap: anywhere; }
 
 /* Shared fields use the app palette in both themes. Popovers stay in the top layer. */
 .shared-field { display: inline-flex; width: 100%; min-width: 0; max-width: 100%; vertical-align: middle; }
@@ -983,3 +979,14 @@ kbd { font: 600 12px/1 ui-monospace, monospace; padding: 2px 6px; border: 1px so
 .field-popup input[type=text] { background: var(--card); color: var(--ink); border-color: var(--line-2); }
 .select-option-row, .select-option-heading { display: block; }
 .select-option-heading { padding: 6px 8px 2px; color: var(--muted); font-size: 11px; }
+
+.sidebar-remarks .field-trigger { background: transparent; color: inherit; border-color: transparent; }
+.sidebar-remarks .field-trigger:hover { background: rgba(255,255,255,.09); }
+.sidebar-remarks .field-value { overflow: visible; }
+.select-popup button small { display: block; }
+.team-header-actions { max-width: 100%; }
+@media (max-width: 1100px) {
+  .sidebar-remarks { width: auto; }
+  .sidebar-remarks .field-trigger { padding: 5px; }
+  .sidebar-remarks .sidebar-remarks-label, .sidebar-remarks .field-chevron { display: none; }
+}

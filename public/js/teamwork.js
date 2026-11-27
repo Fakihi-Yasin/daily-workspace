@@ -172,21 +172,21 @@ const completedOn = (task, ctx, date = ctx.today) => task.status === 'done' && t
 export function RemarkNotifications() {
   const { data, reload } = useRpc('team_remark_notifications', {});
   const count = (data || []).reduce((total, thread) => total + thread.unread, 0);
-  const details = useRef(null);
   useEffect(() => {
     addEventListener('focus', reload);
     return () => removeEventListener('focus', reload);
   }, [reload]);
   if (!count) return null;
-  return html`<details class="remark-notifications" ref=${details}>
-    <summary><${Icon} name="note" size=${16} />Unread remarks <span class="team-badge">${count}</span></summary>
-    <ul>${data.map(thread => html`<li key=${thread.id}>
-      <a href=${'#/teams/' + thread.team_id + '?tab=remarks&thread=' + thread.id}
-        onClick=${() => { details.current.open = false; }}>
-        <strong>${firstLine(thread.title)}</strong><span class="small muted">${thread.team_name} · ${thread.unread} unread</span>
-      </a>
-    </li>`)}</ul>
-  </details>`;
+  const options = [{
+    value: '', disabled: true, label: 'Remarks',
+    content: html`<span class="row"><${Icon} name="note" size=${16} /><span class="sidebar-remarks-label">Remarks</span><span class="team-badge">${count}</span></span>`,
+  }, ...data.map(thread => ({
+    value: '#/teams/' + thread.team_id + '?tab=remarks&thread=' + thread.id,
+    label: firstLine(thread.title),
+    content: html`<span><strong>${firstLine(thread.title)}</strong><small class="muted">${thread.team_name} · ${thread.unread} unread</small></span>`,
+  }))];
+  return html`<${Select} class="sidebar-remarks" aria-label=${'Remarks, ' + count + ' unread'} options=${options}
+    value="" onChange=${e => { location.hash = e.target.value; }} />`;
 }
 
 const TABS = [['board', 'Board'], ['people', 'People'], ['scores', 'Daily score'], ['future', 'Future projects'], ['routines', 'Routines'], ['remarks', 'Remarks'], ['activity', 'Activity']];
@@ -247,11 +247,13 @@ function TeamPage({ id }) {
       <h1>${data.team.name}</h1>
       ${me.access === 'owner' ? html`<${Chip} color="solid">Owner<//>` : me.access === 'member' ? html`<${Chip}>Member<//>` : html`<${Chip} color="yellow">Read-only access<//>`}
       <span class="spacer"></span>
-      ${isMember && html`<button class="btn sm team-remarks-button" disabled=${!inbox.data && !inbox.error} onClick=${openRemarks}>
-        <${Icon} name="note" size=${15} />Remarks
-        ${unreadRemarks > 0 && html`<span class="team-badge" aria-label=${unreadRemarks + ' unread'}>${unreadRemarks}</span>`}
-      </button>`}
-      ${(ctx.owner || isSuper()) && html`<${TeamMenu} team=${{ ...data.team, categories: data.categories }} owner=${ctx.owner} counts=${{ tasks: t.length, members: data.members.length, projects: data.projects.filter(p => !p.moved_at).length }} />`}
+      <div class="row wrap team-header-actions">
+        ${isMember && html`<button class="btn sm team-remarks-button" disabled=${!inbox.data && !inbox.error} onClick=${openRemarks}>
+          <${Icon} name="note" size=${15} />Remarks
+          ${unreadRemarks > 0 && html`<span class="team-badge" aria-label=${unreadRemarks + ' unread'}>${unreadRemarks}</span>`}
+        </button>`}
+        ${(ctx.owner || isSuper()) && html`<${TeamMenu} team=${{ ...data.team, categories: data.categories }} owner=${ctx.owner} counts=${{ tasks: t.length, members: data.members.length, projects: data.projects.filter(p => !p.moved_at).length }} />`}
+      </div>
     </header>
     <div class="tiles team-summary">
       <div class="tile"><span class="v">${t.filter(k => k.status === 'todo').length}</span><span class="k">To do</span></div>
