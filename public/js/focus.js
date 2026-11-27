@@ -1,3 +1,4 @@
+import { Select, DateField, TimeField } from './controls.js';
 // Focus session panel: compact start form, running timer, end-of-session choice, coding "Off".
 import { html, useState, useEffect, useRef, useResource, api, act, bus, toast, Icon, Bar, Chip, clock, fmtDur, fmtDateTime, addDays,
   UNITS, toSec, fromSec, useNow } from './lib.js';
@@ -197,7 +198,7 @@ function DurationForm({ label = 'OK', onSubmit }) {
   const [u, setU] = useState('min');
   return html`<form class="inner row" onSubmit=${(e) => { e.preventDefault(); const sec = toSec(v, u); if (sec >= 60) onSubmit(sec); }}>
     <input type="number" min="1" step="any" value=${v} onInput=${(e) => setV(e.target.value)} placeholder="0" aria-label="Amount" style="width:70px" />
-    <select value=${u} onChange=${(e) => setU(e.target.value)} aria-label="Unit" style="width:auto">${UNITS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select>
+    <${Select} value=${u} onChange=${(e) => setU(e.target.value)} aria-label="Unit" style="width:auto">${UNITS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}<//>
     <button class="btn sm">${label}</button>
   </form>`;
 }
@@ -239,8 +240,8 @@ function OffChooser({ today, onDone }) {
       <button class="btn sm" aria-expanded=${custom} onClick=${() => setCustom(!custom)}>Custom date</button>
     </div>
     ${custom && html`<form class="row wrap" style="margin-top:10px" onSubmit=${(e) => { e.preventDefault(); go({ preset: 'custom', until_date: d, until_time: t }); }}>
-      <input type="date" min=${today} value=${d} onInput=${(e) => setD(e.target.value)} aria-label="Pause end (date)" style="width:auto" />
-      <input type="time" value=${t} onInput=${(e) => setT(e.target.value)} aria-label="Pause end (time)" style="width:auto" />
+      <${DateField} min=${today} value=${d} onInput=${(e) => setD(e.target.value)} aria-label="Pause end (date)" style="width:auto" />
+      <${TimeField} value=${t} onInput=${(e) => setT(e.target.value)} aria-label="Pause end (time)" style="width:auto" />
       <button class="btn sm primary">Pause focus prompts</button>
     </form>`}
   </div>`;
@@ -281,14 +282,14 @@ function StartForm({ onCancel, onStarted, prefill }) {
     <div class="fp-head"><span class="label">Start a session</span><span class="spacer"></span><button type="button" class="btn sm ghost" onClick=${onCancel}>Cancel</button></div>
     <div class="fp-grid">
       <label class="field">Project
-        <select value=${proj} onChange=${(e) => { setProj(e.target.value); setMilestone(null); const np = (projects || []).find(x => x.id === +e.target.value); setTask(np && np.next_action ? np.next_action : ''); }}>
+        <${Select} value=${proj} onChange=${(e) => { setProj(e.target.value); setMilestone(null); const np = (projects || []).find(x => x.id === +e.target.value); setTask(np && np.next_action ? np.next_action : ''); }}>
           <option value="">Quick task (no project)</option>
           ${groups.map(([c, l]) => html`<optgroup label=${c.name}>${l.map(x => html`<option value=${x.id}>${x.name}${x.topic ? ' — ' + x.topic : ''}</option>`)}</optgroup>`)}
           ${uncategorised.length > 0 && html`<optgroup label="No category">${uncategorised.map(x => html`<option value=${x.id}>${x.name}</option>`)}</optgroup>`}
-        </select>
+        <//>
       </label>
       ${!p && html`<label class="field"><span>Category <span class="hint">(optional)</span></span>
-        <select value=${cat} onChange=${(e) => setCat(e.target.value)}><option value="">None</option>${(cats || []).filter(c => c.coding).map(c => html`<option value=${c.id}>${c.name}</option>`)}</select></label>`}
+        <${Select} value=${cat} onChange=${(e) => setCat(e.target.value)}><option value="">None</option>${(cats || []).filter(c => c.coding).map(c => html`<option value=${c.id}>${c.name}</option>`)}<//></label>`}
       <label class="field fp-task">${p ? 'Task' : 'Quick task'}
         <input type="text" value=${task} onInput=${(e) => { setTask(e.target.value); const m = suggestions.find(s => s.label === e.target.value); setMilestone(m ? m.milestone : null); }}
           placeholder=${p ? 'What part of the project?' : 'e.g. fix the pricing page'} required=${!p} />
@@ -300,7 +301,7 @@ function StartForm({ onCancel, onStarted, prefill }) {
       <div class="field"><span>Duration</span>
         <div class="row">
           <input type="number" min="1" step="any" value=${amount} onInput=${(e) => setDur([e.target.value, unit])} aria-label="Duration amount" style="width:88px" />
-          <select value=${unit} onChange=${(e) => setDur([amount, e.target.value])} aria-label="Duration unit" style="width:auto">${UNITS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select>
+          <${Select} value=${unit} onChange=${(e) => setDur([amount, e.target.value])} aria-label="Duration unit" style="width:auto">${UNITS.map(([k, l]) => html`<option value=${k}>${l}</option>`)}<//>
           <span class="small muted num" aria-live="polite">${valid ? '= ' + fmtDur(sec) : 'Between 1 minute and 30 days'}</span>
         </div>
       </div>

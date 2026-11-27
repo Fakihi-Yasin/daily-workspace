@@ -1,3 +1,4 @@
+import { Select } from './controls.js';
 // Formation: courses / skills, modules, optional study time (separate from coding time).
 import { html, useState, useResource, act, toast, Icon, Bar, Chip, Modal, Empty, fmtDur, fmtShort } from './lib.js';
 
@@ -21,8 +22,8 @@ function Course({ c }) {
   const [showLogs, setShowLogs] = useState(false);
   return html`<section class="card stack" aria-label=${c.name}>
     <div class="row"><h3 style="flex:1">${c.name}</h3><${Chip} color=${c.kind === 'skill' ? 'mint' : 'sky'}>${c.kind === 'skill' ? 'Skill' : 'Course'}</${Chip}>
-      <select value=${c.status} aria-label="Status" style="width:auto;min-height:30px;padding:2px 6px" onChange=${(e) => act('PUT', `/api/courses/${c.id}`, { status: e.target.value })}>
-        <option value="active">In progress</option><option value="paused">Paused</option><option value="done">Done</option></select></div>
+      <${Select} value=${c.status} aria-label="Status" style="width:auto;min-height:30px;padding:2px 6px" onChange=${(e) => act('PUT', `/api/courses/${c.id}`, { status: e.target.value })}>
+        <option value="active">In progress</option><option value="paused">Paused</option><option value="done">Done</option><//></div>
     ${c.link && html`<a class="small" href=${c.link} target="_blank" rel="noopener noreferrer">${c.link.replace(/^https?:\/\//, '').slice(0, 50)}</a>`}
     <div><div class="row small"><span class="muted">${c.progress.done}/${c.progress.total} modules completed</span><span class="spacer"></span><strong class="num">${c.progress.total ? c.progress.pct + '%' : '—'}</strong></div>
       <div style="margin-top:6px"><${Bar} value=${c.progress.pct || 0} color="mint" label=${'Progress ' + c.name} /></div></div>

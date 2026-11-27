@@ -1,3 +1,4 @@
+import { Select } from './controls.js';
 // Users (Super Admin only): everyone who signed up through Auth0, their role and status.
 // The database refuses every call here from anyone but an active Super Admin; the sidebar link and
 // the route guard in app.js only keep the page out of other people's way.
@@ -75,10 +76,10 @@ export function Users() {
           <td>${u.email || html`<span class="muted">not yet known</span>`}${u.email && !u.email_verified ? html` <${Chip} color="yellow" title="Email not confirmed: can't be added to teams by email">unconfirmed<//>` : ''}</td>
           <td title=${u.last_seen_at ? 'Last seen ' + fmtWhen(u.last_seen_at) : 'Never signed in to this app'}>${fmtDate(u.signed_up_at)}</td>
           <td>
-            <select class="sm-select" aria-label=${'Role of ' + label(u)} value=${u.role} disabled=${self || lastSuper}
+            <${Select} class="sm-select" aria-label=${'Role of ' + label(u)} value=${u.role} disabled=${self || lastSuper}
               title=${self ? 'You can’t change your own role' : lastSuper ? 'The last active Super Admin can’t be demoted' : u.role_changed_by ? `Changed by ${u.role_changed_by.name}, ${fmtWhen(u.role_changed_at)}` : ''}
               onChange=${(e) => { const v = e.target.value; e.target.value = u.role; setRoleFor(u, v); }}>
-              ${ROLES.map(([k, l]) => html`<option value=${k} disabled=${k === 'super_admin' && u.role !== 'super_admin'}>${l}${k === 'super_admin' && u.role !== 'super_admin' ? ' (only one)' : ''}</option>`)}</select>
+              ${ROLES.map(([k, l]) => html`<option value=${k} disabled=${k === 'super_admin' && u.role !== 'super_admin'}>${l}${k === 'super_admin' && u.role !== 'super_admin' ? ' (only one)' : ''}</option>`)}<//>
           </td>
           <td><${Chip} color=${u.status === 'blocked' ? 'pink' : 'mint'} title=${u.status_changed_by ? `Changed by ${u.status_changed_by.name}, ${fmtWhen(u.status_changed_at)}` : undefined}>${u.status === 'blocked' ? 'Blocked' : 'Active'}<//></td>
           <td class="r"><${ActionsMenu} label=${label(u)} items=${[

@@ -76,7 +76,7 @@ function App() {
         ${window.__dash && html`<${Account} />`}
       </div>
     </nav>
-    <main id="main">${hasTeams() && html`<${RemarkNotifications} />`}${window.__dash && window.__dash.sync && html`<${SyncBanner} />`}<${Page} key=${r[0]} sub=${rest.join('/')} superOnly=${r[0] === 'users'} /></main>
+    <main id="main">${hasTeams() && !(route === 'teams' && rest.length) && html`<${RemarkNotifications} />`}${window.__dash && window.__dash.sync && html`<${SyncBanner} />`}<${Page} key=${r[0]} sub=${rest.join('/')} superOnly=${r[0] === 'users'} /></main>
     <${Toasts} />
     <${QuickAdd} />
     <${Onboarding} />

@@ -1,3 +1,4 @@
+import { Select, DateField, SuggestField } from './controls.js';
 // Personal workspace UI: the account's own layout (home sections and sidebar), first-login starter
 // setups, the Customize dialog, a category field you can type a new category into, the Calendar and
 // Projects sections, Quick Add (any page) and Saved views. Everything is stored in the account's own
@@ -44,15 +45,12 @@ export function homeSections(layout) { return layout ? shownKeys(layout.home).fi
 export function navItems(layout) { return layout ? shownKeys(layout.nav).filter(availableNav) : null; }
 
 // ---------- category field: pick one, or type a new one (created when saved) ----------
-let catListId = 0;
 export function CategoryInput({ value, onInput, cats, label = 'Category', placeholder = 'No category', id, compact }) {
-  const [listId] = useState(() => 'cat-list-' + (++catListId));
   const suggested = (ws.data && ws.data.suggested) || ['Work', 'Study', 'Personal'];
   const active = (cats || []).filter(c => !c.archived && c.key !== 'other');
   const names = [...active.map(c => c.name), ...suggested.filter(s => !active.some(c => c.name.toLowerCase() === s.toLowerCase()))];
-  const input = html`<input id=${id} type="text" list=${listId} maxlength="60" autocomplete="off" value=${value} placeholder=${placeholder}
-      aria-label=${compact ? label : undefined} onInput=${(e) => onInput(e.target.value)} />
-    <datalist id=${listId}>${names.map(n => html`<option value=${n} />`)}</datalist>`;
+  const input = html`<${SuggestField} id=${id} maxlength="60" value=${value} placeholder=${placeholder}
+    label=${label} choices=${names} onInput=${onInput} />`;
   return compact ? html`<span class="cat-input">${input}</span>` : html`<label class="field cat-input">${label}${input}
     <span class="hint">Pick one or type a new name: it’s created for you.</span></label>`;
 }
@@ -173,7 +171,7 @@ export function QuickAdd() {
     const key = (e) => {
       if (e.key !== 'q' || e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target; if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-      if (document.querySelector('.modal-back, [role=dialog]')) return;
+      if (document.querySelector('.modal-back, [role=dialog]:not([popover]), [popover]:popover-open')) return;
       e.preventDefault(); setOpen(true);
     };
     addEventListener('keydown', key);
@@ -203,8 +201,8 @@ function QuickAddModal({ onClose }) {
     <form class="stack" onSubmit=${submit}>
       <label class="field">Task<input ref=${ref} type="text" maxlength="1000" required value=${f.title} onInput=${(e) => set({ ...f, title: e.target.value })} placeholder="e.g. Hand in the essay" /></label>
       <div class="grid2">
-        <label class="field">Date<input type="date" value=${f.date || today || ''} onInput=${(e) => set({ ...f, date: e.target.value })} /></label>
-        <label class="field">Repeat<select value=${f.repeat} onChange=${(e) => set({ ...f, repeat: e.target.value })}>${REPEAT_LABELS.map(([v, l]) => html`<option value=${v}>${l}</option>`)}</select></label>
+        <label class="field">Date<${DateField} value=${f.date || today || ''} onInput=${(e) => set({ ...f, date: e.target.value })} /></label>
+        <label class="field">Repeat<${Select} value=${f.repeat} onChange=${(e) => set({ ...f, repeat: e.target.value })}>${REPEAT_LABELS.map(([v, l]) => html`<option value=${v}>${l}</option>`)}<//></label>
       </div>
       <${CategoryInput} value=${f.cat} onInput=${(v) => set({ ...f, cat: v })} cats=${boot && boot.categories} />
       <${SubtaskDraft} value=${f.subtasks} onInput=${subtasks => set({ ...f, subtasks })} />
@@ -269,9 +267,9 @@ function NewView({ cats, custom, onClose }) {
     <form class="stack" onSubmit=${save}>
       <label class="field">Name<input type="text" maxlength="60" required value=${f.name} onInput=${(e) => set({ ...f, name: e.target.value })} placeholder="e.g. Exams" /></label>
       <div class="grid2">
-        <label class="field">When<select value=${f.range} onChange=${(e) => set({ ...f, range: e.target.value })}>${RANGES.map(([v, l]) => html`<option value=${v}>${l}</option>`)}</select></label>
-        <label class="field">Category<select value=${f.category_id} onChange=${(e) => set({ ...f, category_id: e.target.value })}><option value="">Any</option>
-          ${(cats || []).filter(c => !c.archived).map(c => html`<option value=${c.id}>${c.name}</option>`)}</select></label>
+        <label class="field">When<${Select} value=${f.range} onChange=${(e) => set({ ...f, range: e.target.value })}>${RANGES.map(([v, l]) => html`<option value=${v}>${l}</option>`)}<//></label>
+        <label class="field">Category<${Select} value=${f.category_id} onChange=${(e) => set({ ...f, category_id: e.target.value })}><option value="">Any</option>
+          ${(cats || []).filter(c => !c.archived).map(c => html`<option value=${c.id}>${c.name}</option>`)}<//></label>
       </div>
       <div class="row"><span class="spacer"></span><button type="button" class="btn" onClick=${() => onClose(null)}>Cancel</button><button class="btn primary" disabled=${!f.name.trim()}>Save view</button></div>
     </form>

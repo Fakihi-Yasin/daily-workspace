@@ -1,3 +1,4 @@
+import { Select, DateField } from './controls.js';
 // YouTube: channels and a simple video pipeline. Only published videos count as publications.
 import { html, useState, useResource, act, toast, Icon, Chip, Modal, Empty, fmtShort, addDays } from './lib.js';
 
@@ -59,12 +60,12 @@ function VideoForm({ v, channels, today, onClose }) {
   return html`<${Modal} title=${v.id ? 'Video' : 'New video'} onClose=${onClose}>
     <form class="stack" onSubmit=${save}>
       <label class="field">Title<input type="text" required value=${f.title} onInput=${(e) => set({ title: e.target.value })} /></label>
-      <label class="field">Channel<select value=${f.channel_id} onChange=${(e) => set({ channel_id: +e.target.value })}>${channels.map(c => html`<option value=${c.id}>${c.name}</option>`)}</select></label>
+      <label class="field">Channel<${Select} value=${f.channel_id} onChange=${(e) => set({ channel_id: +e.target.value })}>${channels.map(c => html`<option value=${c.id}>${c.name}</option>`)}<//></label>
       <fieldset><legend>Stage</legend><div class="seg">${STAGES.map(([k, l]) => html`<button type="button" class=${f.stage === k ? 'on' : ''} onClick=${() => set({ stage: k })}>${l}</button>`)}</div></fieldset>
       ${f.stage === 'published'
-        ? html`<div class="grid2"><label class="field">Publish date<input type="date" max=${addDays(today, 0)} value=${f.published_date} onInput=${(e) => set({ published_date: e.target.value })} required /></label>
+        ? html`<div class="grid2"><label class="field">Publish date<${DateField} aria-label="Publish date" max=${addDays(today, 0)} value=${f.published_date} onInput=${(e) => set({ published_date: e.target.value })} required /></label>
             <label class="field">URL<input type="url" value=${f.url} onInput=${(e) => set({ url: e.target.value })} placeholder="https://youtube.com/…" /></label></div>`
-        : html`<label class="field">Planned publish date (optional)<input type="date" value=${f.planned_date} onInput=${(e) => set({ planned_date: e.target.value })} /></label>`}
+        : html`<label class="field">Planned publish date (optional)<${DateField} aria-label="Planned publish date (optional)" value=${f.planned_date} onInput=${(e) => set({ planned_date: e.target.value })} /></label>`}
       <label class="field">Notes<textarea value=${f.notes} onInput=${(e) => set({ notes: e.target.value })} /></label>
       <div class="form-actions">
         ${v.id && html`<button type="button" class="btn ghost danger" onClick=${async () => { await act('DELETE', `/api/videos/${v.id}`); onClose(); }}>Delete</button>`}

@@ -1,3 +1,4 @@
+import { Select, DateField } from './controls.js';
 // Projects and future plans, with milestone-based progress (separate from the daily score).
 import { html, useState, useResource, act, toast, Icon, Bar, Chip, Modal, Empty, fmtDay, fmtMonth, fmtDur } from './lib.js';
 
@@ -83,15 +84,15 @@ function CategoryField({ value, onChange, cats }) {
       ? html`<div class="row wrap">
           <input type="text" value=${name} onInput=${(e) => setName(e.target.value)} placeholder="New category name" aria-label="New category name" style="flex:1;min-width:140px"
             onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); create(); } if (e.key === 'Escape') { e.preventDefault(); setCreating(false); } }} autofocus />
-          <select value=${color} onChange=${(e) => setColor(e.target.value)} aria-label="Color" style="width:auto">${COLORS.map(c => html`<option value=${c}>${c}</option>`)}</select>
+          <${Select} value=${color} onChange=${(e) => setColor(e.target.value)} aria-label="Color" style="width:auto">${COLORS.map(c => html`<option value=${c}>${c}</option>`)}<//>
           <button type="button" class="btn sm primary" disabled=${!name.trim() || busy} onClick=${create}>Create</button>
           <button type="button" class="btn sm" onClick=${() => setCreating(false)}>Cancel</button>
         </div>`
-      : html`<select id="proj-cat" value=${value || ''} onChange=${(e) => { if (e.target.value === '__new') { e.target.value = value || ''; setCreating(true); } else onChange(+e.target.value || null); }}>
+      : html`<${Select} id="proj-cat" value=${value || ''} onChange=${(e) => { if (e.target.value === '__new') { e.target.value = value || ''; setCreating(true); } else onChange(+e.target.value || null); }}>
           <option value="">No category</option>
           ${cats.filter(c => !c.archived || c.id === value).map(c => html`<option value=${c.id}>${c.name}${c.archived ? ' (archived)' : ''}</option>`)}
           <option value="__new">+ Create category…</option>
-        </select>`}
+        <//>`}
   </div>`;
 }
 
@@ -107,8 +108,8 @@ function Fields({ f, set, cats }) {
       <fieldset><legend>Due</legend><div class="seg">
         <button type="button" class=${f.approx ? 'on' : ''} onClick=${() => set({ approx: true, planned_for: (f.planned_for || '').slice(0, 7) })}>Approximate month</button>
         <button type="button" class=${!f.approx ? 'on' : ''} onClick=${() => set({ approx: false })}>Exact date</button></div></fieldset>
-      ${f.approx ? html`<input type="month" value=${f.planned_for.slice(0, 7)} onInput=${(e) => set({ planned_for: e.target.value })} aria-label="Month" style="width:auto" />`
-        : html`<input type="date" value=${f.planned_for.length === 10 ? f.planned_for : ''} onInput=${(e) => set({ planned_for: e.target.value })} aria-label="Date" style="width:auto" />`}
+      ${f.approx ? html`<${DateField} month value=${f.planned_for.slice(0, 7)} onInput=${(e) => set({ planned_for: e.target.value })} aria-label="Month" style="width:auto" />`
+        : html`<${DateField} value=${f.planned_for.length === 10 ? f.planned_for : ''} onInput=${(e) => set({ planned_for: e.target.value })} aria-label="Date" style="width:auto" />`}
       ${f.status !== 'planned_date' && html`<span class="hint">optional</span>`}
     </div>`}
     <label class="field">Next action<input type="text" value=${f.next_action} onInput=${(e) => set({ next_action: e.target.value })} /></label>
@@ -160,9 +161,9 @@ function ProjectDetail({ p, cats, onClose }) {
     <div class="stack">
       <div class="status-row">
         <label for=${'pstatus-' + p.id} class="label">Status</label>
-        <select id=${'pstatus-' + p.id} class="status-select" value=${p.status} onChange=${(e) => changeStatus(e.target.value)}>
+        <${Select} id=${'pstatus-' + p.id} class="status-select" value=${p.status} onChange=${(e) => changeStatus(e.target.value)}>
           ${Object.entries(STATUS).map(([k, l]) => html`<option value=${k}>${l}</option>`)}
-        </select>
+        <//>
         <${Chip} color=${STATUS_COLOR[p.status]}>${statusLabel(p.status)}</${Chip}>
       </div>
       <div class="card flat">

@@ -1,3 +1,4 @@
+import { DateField } from './controls.js';
 // Challenges: goals computed from what is already checked in "Today".
 import { html, useState, useResource, act, toast, Icon, Bar, Ring, Chip, Modal, Empty, fmtDay, fmtShort, addDays, DAYS, DAY_NAMES, pct } from './lib.js';
 
@@ -96,8 +97,8 @@ function CreateChallenge({ onClose }) {
     <form class="stack" onSubmit=${create}>
       <div class="row wrap" style="align-items:flex-end">
         <label class="field" style="flex:1;min-width:220px">Name<input type="text" value=${name} onInput=${(e) => setName(e.target.value)} /></label>
-        <label class="field">Start<input type="date" value=${s} onInput=${(e) => setStart(e.target.value)} /></label>
-        <label class="field">End<input type="date" min=${s} value=${end || defEnd} onInput=${(e) => setEnd(e.target.value)} /></label>
+        <label class="field">Start<${DateField} aria-label="Start" value=${s} onInput=${(e) => setStart(e.target.value)} /></label>
+        <label class="field">End<${DateField} aria-label="End" min=${s} value=${end || defEnd} onInput=${(e) => setEnd(e.target.value)} /></label>
       </div>
       <p class="hint">Default: one month. Checked accounts are fixed: an account added later does not change this challenge.</p>
       <h3>Tracked activities</h3>

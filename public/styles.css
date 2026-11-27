@@ -221,7 +221,7 @@ main { min-width: 0; padding: 28px 36px 80px; max-width: 1600px; width: 100%; }
 .seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px; background: var(--track); border-radius: 11px; }
 .seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 8px; font-weight: 600; cursor: pointer; color: var(--ink-2); font-size: 13.5px; }
 .seg button.on { background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
-.seg input[type=date] { border: 0; background: transparent; padding: 4px 8px; font-size: 13px; }
+.seg .date-field .field-trigger { border: 0; background: transparent; padding: 4px 8px; font-size: 13px; }
 
 /* ---------- chips / bars ---------- */
 .chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 99px; font-size: 12px; font-weight: 650; white-space: nowrap; }
@@ -258,8 +258,8 @@ legend { font-weight: 600; font-size: 13px; margin-bottom: 6px; padding: 0; }
 .effect-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; }
 .effect-row .seg { background: var(--card); }
 .effect-row .seg button.on { background: var(--solid); color: var(--solid-fg); }
-input[type=date].effect-date { width: auto; min-width: 170px; }
-input[type=date].effect-date.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.date-field.effect-date { width: auto; min-width: 170px; }
+.date-field.effect-date.on .field-trigger { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .effect .hint { margin: 10px 0 0; color: var(--ink-2); }
 .daypick { display: inline-flex; gap: 4px; }
 .daypick button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--card); font-weight: 700; cursor: pointer; }
@@ -746,7 +746,7 @@ main { padding-bottom: 32px; }
 .pick-avatar { flex: 0 0 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--accent-soft); color: var(--ink); }
 .pick-id { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pick-id > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.team-new-task select, .team-new-task input[type=date] { width: auto; }
+.team-new-task .shared-field { width: auto; }
 .board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .board-col { background: var(--track); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 80px; }
 .board-col h4 { display: flex; align-items: center; justify-content: space-between; margin: 0 0 2px; }
@@ -896,10 +896,6 @@ kbd { font: 600 12px/1 ui-monospace, monospace; padding: 2px 6px; border: 1px so
 .team-unassigned { color: var(--muted); border: 1px dashed var(--line); border-radius: 5px; padding: 2px 5px; }
 .board-filters, .future-actions { margin: 12px 0; }
 .person-picker { min-width: 0; position: relative; width: min(100%, 220px); }
-.picker-current { width: 100%; justify-content: space-between; min-height: 38px; }
-.picker-options { position: absolute; z-index: 4; top: calc(100% + 4px); left: 0; right: 0; padding: 4px; max-height: 240px; overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
-.picker-options > button { width: 100%; min-height: 38px; text-align: left; color: inherit; border: 0; background: transparent; padding: 5px 8px; cursor: pointer; }
-.picker-options > button:hover, .picker-options > button[aria-pressed=true] { background: var(--track); }
 .team-task-input { flex: 2 1 220px; min-width: 0; }
 .remark-thread { max-height: 45vh; overflow-y: auto; }
 .remark-content p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
@@ -914,12 +910,9 @@ kbd { font: 600 12px/1 ui-monospace, monospace; padding: 2px 6px; border: 1px so
 }
 
 /* Assignee controls keep their text inside the available track. */
-.person-picker .team-person { display: flex; flex: 1; overflow: hidden; white-space: nowrap; }
-.person-picker .team-person-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.person-picker .team-person > :last-child:not(.team-person-name), .picker-arrow { flex: none; }
-.person-picker .team-unassigned { display: block; margin-inline-start: 30px; padding: 0; border: 0; }
-.picker-current { display: flex; gap: 8px; min-width: 0; }
-.picker-options > button { display: flex; align-items: center; min-width: 0; }
+:is(.person-picker,.select-popup) .team-person { display: flex; flex: 1; overflow: hidden; white-space: nowrap; }
+:is(.person-picker,.select-popup) .team-person-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+:is(.person-picker,.select-popup) .team-unassigned { display: block; margin-inline-start: 30px; padding: 0; border: 0; }
 .team-new-task .person-picker { flex: 1 1 205px; max-width: 260px; }
 .team-new-task .team-task-date { flex: 0 0 150px; width: 150px; min-width: 0; }
 .board { align-items: stretch; }
@@ -948,3 +941,45 @@ kbd { font: 600 12px/1 ui-monospace, monospace; padding: 2px 6px; border: 1px so
 .remark-notifications summary { cursor: pointer; width: fit-content; display: flex; align-items: center; gap: 6px; }
 .remark-notifications ul { padding: 0; margin: 8px 0; list-style: none; max-height: 280px; overflow-y: auto; }
 .remark-notifications a { display: grid; gap: 2px; padding: 6px 0; overflow-wrap: anywhere; }
+
+/* Shared fields use the app palette in both themes. Popovers stay in the top layer. */
+.shared-field { display: inline-flex; width: 100%; min-width: 0; max-width: 100%; vertical-align: middle; }
+.field-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0;
+  min-height: 38px; padding: 8px 10px; text-align: start; border: 1px solid var(--line-2); border-radius: 9px;
+  background: var(--card); color: var(--ink); font-size: 14px; cursor: pointer; }
+.field-trigger:disabled { opacity: .55; cursor: default; }
+.field-trigger:focus-visible, .field-trigger[aria-expanded=true], .field-popup button:focus-visible {
+  outline: 2px solid var(--focus-ring); outline-offset: 1px;
+}
+.field-value { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field-chevron, .field-calendar-icon, :is(.person-picker,.select-popup) .team-person .chip { flex: none; }
+.field-chevron, .field-calendar-icon { color: var(--muted); }
+.sm-select .field-trigger { min-height: 32px; padding: 4px 8px; font-size: 13px; }
+.team-new-task .date-field.team-task-date { flex: 0 0 160px; width: 160px; }
+.field-popup { position: fixed; inset: auto; margin: 0; padding: 5px; max-width: calc(100vw - 12px);
+  overflow: auto; overscroll-behavior: contain; background: var(--card); color: var(--ink); border: 1px solid var(--line-2);
+  border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.24); font-size: 14px; }
+.field-popup button { appearance: none; background: transparent; border: 1px solid transparent; color: inherit; border-radius: 7px; cursor: pointer; min-height: 36px; }
+.field-popup button:focus-visible { outline-offset: -2px; }
+.field-popup button:disabled { opacity: .45; cursor: default; }
+.select-popup button { display: flex; align-items: center; width: 100%; padding: 5px 8px; min-width: 0; text-align: start; }
+.field-popup button:not(:disabled):hover, .select-popup [aria-selected=true], .calendar-grid [aria-pressed=true] { background: var(--accent-soft); }
+.select-popup .team-person-name { flex: 1 1 auto; }
+.calendar-popup { padding: 8px; }
+.calendar-controls { display: grid; grid-template-columns: 36px 1fr 36px; align-items: center; text-align: center; margin-bottom: 4px; }
+.calendar-controls button { font-size: 20px; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 2px; text-align: center; }
+.calendar-grid.months { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.calendar-weekdays { color: var(--muted); font-size: 11px; padding: 4px 0; }
+.calendar-grid .adjacent { color: var(--muted); }
+.calendar-clear { display: block; margin: 4px 0 0 auto; padding: 0 10px; }
+.team-checklist input::placeholder, .subtask-draft textarea::placeholder, .field input::placeholder { color: var(--muted); opacity: 1; }
+.team-remarks-button .team-badge { margin-inline-start: 2px; }
+.suggest-empty { display: block; padding: 7px 8px; color: var(--muted); }
+.time-popup { padding: 8px; }
+.time-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin-bottom: 8px; }
+.time-popup button { padding-inline: 8px; }
+.subtasks input::placeholder, .subtasks textarea::placeholder { color: var(--muted); opacity: 1; }
+.field-popup input[type=text] { background: var(--card); color: var(--ink); border-color: var(--line-2); }
+.select-option-row, .select-option-heading { display: block; }
+.select-option-heading { padding: 6px 8px 2px; color: var(--muted); font-size: 11px; }

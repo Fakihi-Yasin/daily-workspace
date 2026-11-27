@@ -1,3 +1,4 @@
+import { Select, DateField } from './controls.js';
 // Stats: asset counts, actual activity, target completion — kept separate.
 import { html, useState, useResource, Bar, Chip, Modal, Empty, Icon, Ring, fmtDay, fmtShort, fmtDur, addDays, pct, KIND_PLURAL, KIND_LABELS } from './lib.js';
 import { CompletedModal } from './history.js';
@@ -35,12 +36,12 @@ export function Stats() {
     <header class="page-head"><h1>Stats</h1></header>
     <div class="row wrap" style="margin-bottom:18px">
       <div class="seg">${[['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['custom', 'Custom']].map(([k, l]) => html`<button class=${kind === k ? 'on' : ''} onClick=${() => setKind(k)}>${l}</button>`)}</div>
-      ${kind === 'custom' && html`<input type="date" value=${cr[0]} max=${cr[1]} onInput=${(e) => setCustom([e.target.value, cr[1]])} aria-label="From" style="width:auto" />
-        <input type="date" value=${cr[1]} min=${cr[0]} onInput=${(e) => setCustom([cr[0], e.target.value])} aria-label="To" style="width:auto" />`}
+      ${kind === 'custom' && html`<${DateField} value=${cr[0]} max=${cr[1]} onInput=${(e) => setCustom([e.target.value, cr[1]])} aria-label="From" style="width:auto" />
+        <${DateField} value=${cr[1]} min=${cr[0]} onInput=${(e) => setCustom([cr[0], e.target.value])} aria-label="To" style="width:auto" />`}
       <span class="muted small">${data.from === data.to ? fmtDay(data.from) : `${fmtShort(data.from)} → ${fmtShort(data.to)}`}</span>
       <span class="spacer"></span>
-      <label class="row small">Inspect<select style="width:auto" value="" onChange=${(e) => e.target.value && setInspect(+e.target.value)}>
-        <option value="">a site or account…</option>${inspectList.map(x => html`<option value=${x.id}>${x.name} (${KIND_LABELS[x.kind]})</option>`)}</select></label>
+      <label class="row small">Inspect<${Select} style="width:auto" value="" onChange=${(e) => e.target.value && setInspect(+e.target.value)}>
+        <option value="">a site or account…</option>${inspectList.map(x => html`<option value=${x.id}>${x.name} (${KIND_LABELS[x.kind]})</option>`)}<//></label>
     </div>
 
     <section><div class="section-head"><h3>My sites, accounts & projects</h3><span class="muted small">today</span></div>

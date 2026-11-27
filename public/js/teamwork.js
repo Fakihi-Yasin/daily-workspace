@@ -1,3 +1,4 @@
+import { Select, DateField } from './controls.js';
 // Team Work: private teams with shared tasks, future projects and a daily team score.
 // Data lives in the shared Supabase tables (never in personal snapshots) and every read and write
 // goes through database functions that check role, blocked status and team membership. The
@@ -216,7 +217,16 @@ function TeamPage({ id }) {
   const loadedAt = data && data.loaded_at;
   const isMember = !!data && (data.me.access === 'owner' || data.me.access === 'member');
   const inbox = useRpc(isMember ? 'team_remark_inbox' : null, { p_team_id: id });
-  const unreadRemarks = (inbox.data || []).reduce((total, thread) => total + thread.unread, 0);
+  const unreadThreads = (inbox.data || []).filter(thread => thread.unread > 0);
+  const unreadRemarks = unreadThreads.reduce((total, thread) => total + thread.unread, 0);
+  const openRemarks = () => {
+    selectTab('remarks');
+    if (unreadThreads.length === 1) {
+      const id = unreadThreads[0].id;
+      setThread(id);
+      history.replaceState(null, '', location.hash + '&thread=' + id);
+    }
+  };
   useEffect(() => {
     if (tab !== 'board' || !loadedAt || !isMember) return;
     if (seenFor.current === loadedAt && !unreadHere) return;
@@ -237,6 +247,10 @@ function TeamPage({ id }) {
       <h1>${data.team.name}</h1>
       ${me.access === 'owner' ? html`<${Chip} color="solid">Owner<//>` : me.access === 'member' ? html`<${Chip}>Member<//>` : html`<${Chip} color="yellow">Read-only access<//>`}
       <span class="spacer"></span>
+      ${isMember && html`<button class="btn sm team-remarks-button" disabled=${!inbox.data && !inbox.error} onClick=${openRemarks}>
+        <${Icon} name="note" size=${15} />Remarks
+        ${unreadRemarks > 0 && html`<span class="team-badge" aria-label=${unreadRemarks + ' unread'}>${unreadRemarks}</span>`}
+      </button>`}
       ${(ctx.owner || isSuper()) && html`<${TeamMenu} team=${{ ...data.team, categories: data.categories }} owner=${ctx.owner} counts=${{ tasks: t.length, members: data.members.length, projects: data.projects.filter(p => !p.moved_at).length }} />`}
     </header>
     <div class="tiles team-summary">
@@ -247,7 +261,7 @@ function TeamPage({ id }) {
       <div class="tile"><span class="v">${t.filter(k => completedOn(k, ctx)).length}</span><span class="k">Done</span></div>
     </div>
     <div class="tabs" role="tablist">${TABS.filter(([k]) => isMember || !['remarks', 'routines'].includes(k)).map(([k, l]) => html`<button role="tab" aria-selected=${tab === k} class=${tab === k ? 'on' : ''} onClick=${() => selectTab(k)}>${l}
-      ${k === 'remarks' && unreadRemarks > 0 ? html`<span class="team-badge">${unreadRemarks}</span>` : k === 'people' ? html`<span class="count">${data.members.length}</span>` : k === 'future' ? html`<span class="count">${data.projects.filter(p => !p.moved_at).length}</span>` : ''}</button>`)}</div>
+      ${k === 'people' ? html`<span class="count">${data.members.length}</span>` : k === 'future' ? html`<span class="count">${data.projects.filter(p => !p.moved_at).length}</span>` : ''}</button>`)}</div>
     ${tab === 'board' && html`<${Board} ctx=${ctx} />`}
     ${tab === 'people' && html`<${People} ctx=${ctx} />`}
     ${tab === 'scores' && html`<${Scores} ctx=${ctx} />`}
@@ -290,23 +304,17 @@ function PersonLabel({ person, me }) {
 }
 
 function PersonPicker({ ctx, label, value, onChange, filter = false }) {
-  const [open, setOpen] = useState(false);
-  const button = useRef(null);
-  const selected = ctx.team.members.find(p => p.id === value);
   const me = ctx.team.members.find(p => p.id === ctx.me.id);
-  const options = [...(filter ? [['all', 'Everyone']] : []), ...(me ? [[me.id, me]] : []),
-    [filter ? 'none' : '', null], ...ctx.team.members.filter(p => p.id !== ctx.me.id).map(p => [p.id, p])];
-  const content = (p) => typeof p === 'string' ? p : html`<${PersonLabel} person=${p} me=${ctx.me.id} />`;
-  return html`<div class="person-picker"
-    onBlur=${e => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false); }}
-    onKeyDown=${e => { if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false); button.current.focus(); } }}>
-    <button type="button" ref=${button} class="btn picker-current" aria-label=${label} aria-expanded=${open}
-      onClick=${() => setOpen(!open)}>${content(value === 'all' ? 'Everyone' : selected)}<span class="picker-arrow" aria-hidden="true">▾</span></button>
-    ${open && html`<div class="picker-options" role="group" aria-label=${label}>
-      ${options.map(([key, p]) => html`<button key=${key} type="button" aria-pressed=${value === key}
-        onClick=${() => { onChange(key); setOpen(false); button.current.focus(); }}>${content(p)}</button>`)}
-    </div>`}
-  </div>`;
+  const people = (p) => ({
+    value: p.id, label: p.id === ctx.me.id ? 'Me ' + p.name : p.name || p.email,
+    content: html`<${PersonLabel} person=${p} me=${ctx.me.id} />`,
+  });
+  const unassigned = { value: filter ? 'none' : '', label: 'Unassigned', content: html`<${PersonLabel} />` };
+  const options = [...(filter ? [{ value: 'all', label: 'Everyone', content: 'Everyone' }] : []),
+    unassigned, ...(me ? [people(me)] : []), ...ctx.team.members.filter(p => p.id !== ctx.me.id).map(people)];
+  const selected = options.some(o => o.value === value) ? value : unassigned.value;
+  return html`<${Select} class="person-picker" aria-label=${label} value=${selected}
+    options=${options} onChange=${e => onChange(e.target.value)} />`;
 }
 
 const TEAM_CARD_TRANSFER = 'application/x-daily-workspace-team-task';
@@ -344,8 +352,8 @@ function Board({ ctx }) {
     ${ctx.member && html`<${NewTask} ctx=${ctx} />`}
     <div class="row wrap board-filters">
       <${PersonPicker} ctx=${ctx} label="Filter by assignee" value=${who} onChange=${setWho} filter />
-      ${tcats.length > 0 && html`<label class="row small">Category<select style="width:auto" value=${catF} onChange=${(e) => setCatF(e.target.value)} aria-label="Filter by team category">
-        <option value="all">All</option>${tcats.map(c => html`<option value=${c.id}>${c.name}${c.archived ? ' (archived)' : ''}</option>`)}<option value="none">No category</option></select></label>`}
+      ${tcats.length > 0 && html`<label class="row small">Category<${Select} style="width:auto" value=${catF} onChange=${(e) => setCatF(e.target.value)} aria-label="Filter by team category">
+        <option value="all">All</option>${tcats.map(c => html`<option value=${c.id}>${c.name}${c.archived ? ' (archived)' : ''}</option>`)}<option value="none">No category</option><//></label>`}
       <button class="btn sm" onClick=${() => setHistoryDate(ctx.today)}>Team task history</button>
     </div>
     <div class="board">
@@ -367,7 +375,7 @@ function Board({ ctx }) {
         onStatus=${move} onEdit=${setEditing} onRemarks=${setRemarks} />`)}
     </div>
     ${historyDate && html`<${Modal} title="Team task history" onClose=${() => setHistoryDate(null)}>
-      <label class="field">Completion date<input type="date" value=${historyDate}
+      <label class="field">Completion date<${DateField} aria-label="Completion date" value=${historyDate}
         onInput=${e => e.target.value && setHistoryDate(e.target.value)} /></label>
       <div class="stack">${ctx.team.tasks.filter(k => completedOn(k,ctx,historyDate)).map(k => html`
         <article class="card flat row wrap" key=${k.id}><strong><${TaskText} text=${k.title} /></strong>
@@ -431,9 +439,9 @@ function TaskCard({ k, ctx, onDrag, onEnd, onStatus, onEdit, onRemarks }) {
       <ul>${k.subtasks.map(item => html`<li key=${item.id}>${item.done ? '✓ ' : ''}${item.title}</li>`)}</ul>
     </details>`}
     <div class="row wrap">
-      ${editableStatus && html`<select class="sm-select" aria-label=${'Status of ' + k.title} value=${k.status}
+      ${editableStatus && html`<${Select} class="sm-select" aria-label=${'Status of ' + k.title} value=${k.status}
             onChange=${e => onStatus(k.id, e.target.value, null)}>
-            ${STATUSES.map(([v, l]) => html`<option value=${v}>${l}</option>`)}</select>`}
+            ${STATUSES.map(([v, l]) => html`<option value=${v}>${l}</option>`)}<//>`}
       <span class="spacer"></span>
       ${ctx.member && html`<button type="button" class=${'btn sm' + (k.urgent_remark ? ' danger' : '')} onClick=${onRemarks}
         aria-label=${'Remarks on ' + k.title}>${k.urgent_remark ? 'Urgent · ' : ''}${k.remark_count ? k.remark_count + ' remark' + (k.remark_count === 1 ? '' : 's') : 'Remarks'}</button>`}
@@ -508,10 +516,10 @@ function NewTask({ ctx }) {
   return html`<form class="card flat team-new-task" onSubmit=${submit} aria-label="New team task">
     <input type="text" maxlength="500" placeholder="New task title" aria-label="Task title" value=${f.title} onInput=${(e) => set({ ...f, title: e.target.value })} class="team-task-input" />
     <${PersonPicker} label="Assignee" ctx=${ctx} value=${f.assignee} onChange=${assignee => set({ ...f, assignee })} />
-    <input class="team-task-date" type="date" aria-label="Due date" value=${f.due} onInput=${(e) => set({ ...f, due: e.target.value })} />
-    <select aria-label="Status" value=${f.status} onChange=${(e) => set({ ...f, status: e.target.value })}>${STATUSES.map(([v, l]) => html`<option value=${v}>${l}</option>`)}</select>
-    ${active.length > 0 && html`<select aria-label="Team category" value=${f.category} onChange=${(e) => set({ ...f, category: e.target.value })}>
-      <option value="">No category</option>${active.map(c => html`<option value=${c.id}>${c.name}</option>`)}</select>`}
+    <${DateField} class="team-task-date" aria-label="Due date" value=${f.due} onInput=${(e) => set({ ...f, due: e.target.value })} />
+    <${Select} aria-label="Status" value=${f.status} onChange=${(e) => set({ ...f, status: e.target.value })}>${STATUSES.map(([v, l]) => html`<option value=${v}>${l}</option>`)}<//>
+    ${active.length > 0 && html`<${Select} aria-label="Team category" value=${f.category} onChange=${(e) => set({ ...f, category: e.target.value })}>
+      <option value="">No category</option>${active.map(c => html`<option value=${c.id}>${c.name}</option>`)}<//>`}
     <button class="btn primary" disabled=${busy || !f.title.trim()}><${Icon} name="plus" size=${16} />Add</button>
     <${SubtaskDraft} value=${f.subtasks} onInput=${subtasks => set({ ...f, subtasks })} />
   </form>`;
@@ -539,12 +547,12 @@ function TaskModal({ ctx, task, onClose }) {
       <div class="grid2">
         <div class="field">Assignee<${PersonPicker} label="Assignee" ctx=${ctx} value=${f.assignee}
           onChange=${assignee => set({ ...f, assignee })} /></div>
-        <label class="field">Due date<input type="date" value=${f.due} onInput=${(e) => set({ ...f, due: e.target.value })} /></label>
+        <label class="field">Due date<${DateField} aria-label="Due date" value=${f.due} onInput=${(e) => set({ ...f, due: e.target.value })} /></label>
       </div>
       <div class="grid2">
-        <label class="field">Status<select value=${f.status} onChange=${(e) => set({ ...f, status: e.target.value })}>${STATUSES.map(([v, l]) => html`<option value=${v}>${l}</option>`)}</select></label>
-        <label class="field">Team category<select value=${f.category} onChange=${(e) => set({ ...f, category: e.target.value })}>
-          <option value="">No category</option>${catOptions.map(c => html`<option value=${c.id}>${c.name}${c.archived ? ' (archived)' : ''}</option>`)}</select></label>
+        <label class="field">Status<${Select} value=${f.status} onChange=${(e) => set({ ...f, status: e.target.value })}>${STATUSES.map(([v, l]) => html`<option value=${v}>${l}</option>`)}<//></label>
+        <label class="field">Team category<${Select} value=${f.category} onChange=${(e) => set({ ...f, category: e.target.value })}>
+          <option value="">No category</option>${catOptions.map(c => html`<option value=${c.id}>${c.name}${c.archived ? ' (archived)' : ''}</option>`)}<//></label>
       </div>
       <p class="small muted">Created by ${task.created_by ? task.created_by.name : 'Unknown'} · last change ${fmtWhen(task.updated_at)}</p>
       <div class="row"><button type="button" class="btn danger" onClick=${() => setDeleting(true)}>Delete</button><span class="spacer"></span>
@@ -656,13 +664,13 @@ function TeamCategories({ team, onClose }) {
     <div class="list">${list.map(c => html`<div class="list-row" key=${c.id}>
       <${Chip} color=${c.color}>●<//>
       <input type="text" maxlength="60" value=${c.name} disabled=${c.archived} aria-label="Category name" onChange=${(e) => e.target.value.trim() && e.target.value !== c.name && save(c, { name: e.target.value })} style="max-width:220px" />
-      <select value=${c.color} disabled=${c.archived} onChange=${(e) => save(c, { color: e.target.value })} aria-label="Color" style="width:auto">${COLORS.map(x => html`<option value=${x}>${x}</option>`)}</select>
+      <${Select} value=${c.color} disabled=${c.archived} onChange=${(e) => save(c, { color: e.target.value })} aria-label="Color" style="width:auto">${COLORS.map(x => html`<option value=${x}>${x}</option>`)}<//>
       <span class="spacer"></span>
       <button class="btn sm" onClick=${() => archive(c, !c.archived)}>${c.archived ? 'Unarchive' : 'Archive'}</button></div>`)}
       ${list.length === 0 && html`<p class="small muted">No categories yet.</p>`}</div>
     <form class="row wrap" style="margin-top:12px" onSubmit=${add}>
       <input type="text" maxlength="60" required placeholder="New category, e.g. Design" value=${name} onInput=${(e) => setName(e.target.value)} style="flex:1;min-width:180px" aria-label="New team category" />
-      <select value=${color} onChange=${(e) => setColor(e.target.value)} aria-label="Color" style="width:auto">${COLORS.map(x => html`<option value=${x}>${x}</option>`)}</select>
+      <${Select} value=${color} onChange=${(e) => setColor(e.target.value)} aria-label="Color" style="width:auto">${COLORS.map(x => html`<option value=${x}>${x}</option>`)}<//>
       <button class="btn primary" disabled=${!name.trim()}>Add</button>
     </form>
   <//>`;
@@ -769,7 +777,7 @@ function Scores({ ctx }) {
   return html`<div>
     <div class="row wrap" style="margin-bottom:12px">
       <button class="icon-btn" aria-label="Previous day" onClick=${() => setDate(addDays(date, -1))}><${Icon} name="chevL" /></button>
-      <input type="date" value=${date} max=${addDays(ctx.today, 365)} onInput=${(e) => e.target.value && setDate(e.target.value)} aria-label="Day" style="width:auto" />
+      <${DateField} value=${date} max=${addDays(ctx.today, 365)} onInput=${(e) => e.target.value && setDate(e.target.value)} aria-label="Day" style="width:auto" />
       <button class="icon-btn" aria-label="Next day" onClick=${() => setDate(addDays(date, 1))}><${Icon} name="chevR" /></button>
       ${date !== ctx.today && html`<button class="btn sm" onClick=${() => setDate(ctx.today)}>Today</button>`}
       <strong>${fmtDay(date)}</strong>
@@ -847,7 +855,7 @@ function TeamChecklist({ projectId, taskId, items }) {
       ${edit?.id === item.id ? html`<form class="row wrap" onSubmit=${async e => {
         e.preventDefault(); if (await call(item.id, { p_title: edit.title })) setEdit(null);
       }}>
-        <input aria-label="Rename subtask" required maxlength="500" value=${edit.title} onInput=${e => setEdit({ ...edit, title: e.target.value })} />
+        <input type="text" aria-label="Rename subtask" required maxlength="500" value=${edit.title} onInput=${e => setEdit({ ...edit, title: e.target.value })} />
         <button class="btn sm">Save name</button><button type="button" class="btn sm" onClick=${() => setEdit(null)}>Cancel</button>
       </form>` : html`<label class="row"><input type="checkbox" checked=${item.done}
           onChange=${async e => { const input=e.currentTarget; if (!(await call(item.id,{ p_done: input.checked }))) input.checked=item.done; }} />${item.title}</label>
@@ -857,7 +865,7 @@ function TeamChecklist({ projectId, taskId, items }) {
     <form class="row wrap" onSubmit=${async e => {
       e.preventDefault(); if (draft.trim() && await call(null, { p_title: draft })) setDraft('');
     }}>
-      <input aria-label="New subtask" maxlength="500" placeholder="New subtask" value=${draft} onInput=${e => setDraft(e.target.value)} />
+      <input type="text" aria-label="New subtask" maxlength="500" placeholder="New subtask" value=${draft} onInput=${e => setDraft(e.target.value)} />
       <button class="btn sm" disabled=${!draft.trim()}>Add subtask</button>
     </form>
   </section>`;
@@ -871,7 +879,7 @@ function StartModal({ p, ctx, onClose }) {
       <div class="grid2">
         <div class="field">Assignee<${PersonPicker} label="Assignee" ctx=${ctx} value=${f.assignee}
           onChange=${assignee => set({ ...f, assignee })} /></div>
-        <label class="field">Due date<input type="date" value=${f.due} onInput=${(e) => set({ ...f, due: e.target.value })} /></label>
+        <label class="field">Due date<${DateField} aria-label="Due date" value=${f.due} onInput=${(e) => set({ ...f, due: e.target.value })} /></label>
       </div>
       <div class="row"><span class="spacer"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button class="btn primary">Move to active work</button></div>
     </form><//>`;
@@ -914,7 +922,7 @@ function RemarksInbox({ ctx, inbox, threadId, clearThread }) {
   return html`<section class="stack">
     <div class="row"><button class="btn primary" onClick=${() => setOpen({})}>New remark</button></div>
     ${inbox.error ? html`<p role="alert">${inbox.error}</p>` : !inbox.data ? html`<p>Loading…</p>`
-      : !inbox.data.length ? html`<${Empty} title="No remarks yet" />` : inbox.data.map(r => html`<article class="card flat stack" key=${r.id}>
+      : !inbox.data.length ? html`<${Empty} title="No remarks yet" />` : inbox.data.slice().sort((a,b) => Number(b.unread > 0) - Number(a.unread > 0)).map(r => html`<article class="card flat stack" key=${r.id}>
         <div class="row wrap small"><${PersonLabel} person=${r.author} me=${ctx.me.id} />
           <time class="muted" datetime=${r.at}>${fmtWhen(r.at)}</time>
           ${r.unread > 0 && html`<span class="team-badge">${r.unread} unread</span>`}
@@ -965,12 +973,12 @@ function TeamRoutines({ ctx }) {
       </article>`)}
     ${form && html`<${Modal} title=${form.id ? 'Manage routine' : 'Add team routine'} onClose=${() => setForm(null)}>
       <form class="stack" onSubmit=${save}>
-        <label class="field">Task title<input required maxlength="500" value=${form.title} onInput=${e => setForm({ ...form, title: e.target.value })} /></label>
+        <label class="field">Task title<input type="text" required maxlength="500" placeholder="e.g. Weekly review" value=${form.title} onInput=${e => setForm({ ...form, title: e.target.value })} /></label>
         <div class="field">Assignee<${PersonPicker} ctx=${ctx} label="Routine assignee" value=${form.assignee_id}
           onChange=${assignee_id => setForm({ ...form, assignee_id })} /></div>
-        <label class="field">Recurrence<select value=${form.recurrence} onChange=${e => setForm({ ...form, recurrence: e.target.value })}>
-          ${TEAM_REPEATS.map(([key, label]) => html`<option value=${key}>${label}</option>`)}</select></label>
-        <label class="field">Start date<input type="date" required disabled=${!!form.id} value=${form.starts_on}
+        <label class="field">Recurrence<${Select} value=${form.recurrence} onChange=${e => setForm({ ...form, recurrence: e.target.value })}>
+          ${TEAM_REPEATS.map(([key, label]) => html`<option value=${key}>${label}</option>`)}<//></label>
+        <label class="field">Start date<${DateField} aria-label="Start date" required disabled=${!!form.id} value=${form.starts_on}
           onInput=${e => setForm({ ...form, starts_on: e.target.value })} /></label>
         ${form.id && html`<label class="row"><input type="checkbox" checked=${!form.active}
           onChange=${e => setForm({ ...form, active: !e.target.checked })} />Pause future occurrences</label>`}

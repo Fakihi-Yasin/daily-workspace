@@ -1,3 +1,4 @@
+import { Select, SuggestField, TimeField } from './controls.js';
 // Settings: accounts & sites, routines (versioned with effective dates), categories, timezone, backup, demo.
 import { html, useState, useEffect, useRef, useResource, api, act, bus, toast, Icon, useTheme, THEMES, downloadJson, isBrowserStorage, isCloudStorage, BROWSER_NOTE, CLOUD_NOTE, Chip, Modal, EffectPicker, Empty, fmtDay, fmtShort, addDays,
   KIND_LABELS, KIND_PLURAL, KIND_COLOR, DAYS, DAY_NAMES, kindsFor, ActionsMenu } from './lib.js';
@@ -57,7 +58,7 @@ function Assets({ data }) {
     <form class="card" onSubmit=${add}>
       <h3 style="margin-bottom:12px">Add a site, account or page</h3>
       <div class="row wrap" style="align-items:flex-end">
-        <label class="field" style="width:190px">Type<select value=${kind} onChange=${(e) => setKind(e.target.value)}>${kinds.map(k => html`<option value=${k}>${KIND_LABELS[k]}</option>`)}</select></label>
+        <label class="field" style="width:190px">Type<${Select} value=${kind} onChange=${(e) => setKind(e.target.value)}>${kinds.map(k => html`<option value=${k}>${KIND_LABELS[k]}</option>`)}<//></label>
         <label class="field" style="flex:1;min-width:180px">Name<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} placeholder="e.g. Company website, Support inbox…" /></label>
         <label class="field" style="flex:1;min-width:200px">Link (optional)<input type="url" value=${url} onInput=${(e) => setUrl(e.target.value)} placeholder="https://" /></label>
       </div>
@@ -142,8 +143,8 @@ function EditAsset({ a, assets, onClose, onPause }) {
   return html`<${Modal} title=${'Edit · ' + a.name} onClose=${onClose}>
     <form class="stack" onSubmit=${save}>
       <label class="field">Name<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} /></label>
-      <label class="field">Type<select value=${kind} onChange=${(e) => { setKind(e.target.value); setConflict(null); }}>
-        ${kindsFor(assets, a.kind).map(k => html`<option value=${k}>${KIND_LABELS[k]}</option>`)}</select></label>
+      <label class="field">Type<${Select} value=${kind} onChange=${(e) => { setKind(e.target.value); setConflict(null); }}>
+        ${kindsFor(assets, a.kind).map(k => html`<option value=${k}>${KIND_LABELS[k]}</option>`)}<//></label>
       <label class="field">Link<input type="url" value=${url} onInput=${(e) => { setUrl(e.target.value); setConflict(null); }} placeholder="https://" /></label>
       <label class="field">Notes<textarea value=${notes} onInput=${(e) => setNotes(e.target.value)} /></label>
       ${moving
@@ -247,9 +248,8 @@ function RoutineEditor({ r, data, onClose }) {
         <p class="hint" style="margin-top:6px">${type === 'counter' ? 'A numeric target (per account or shared) with numbered boxes.' : type === 'social' ? 'Slots (Morning, Evening…): video produced + one publication per destination.' : 'A one-click task, optionally split into small steps.'}</p></fieldset>`}
       <div class="grid2">
         <label class="field">Name<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} /></label>
-        <label class="field">Score category<input type="text" list="cat-list" value=${category} onInput=${(e) => setCategory(e.target.value)} placeholder="e.g. Marketing" />
-          <span class="hint">Tasks in the same category form a single score.</span>
-          <datalist id="cat-list">${cats.map(c => html`<option value=${c} />`)}</datalist></label>
+        <label class="field">Score category<${SuggestField} label="Score category" choices=${cats} value=${category} onInput=${setCategory} placeholder="e.g. Marketing" />
+          <span class="hint">Tasks in the same category form a single score.</span></label>
       </div>
       <div class="row wrap" style="gap:18px;align-items:flex-end">
         <fieldset><legend>Active days</legend><div class="daypick">${DAYS.map(([d, l]) => { const on = (cfg.days || []).includes(d); return html`<button type="button" class=${on ? 'on' : ''} aria-pressed=${on} aria-label=${DAY_NAMES[d]} onClick=${() => set({ days: on ? cfg.days.filter(x => x !== d) : [...(cfg.days || []), d] })}>${l}</button>`; })}</div></fieldset>
@@ -276,7 +276,7 @@ function CounterFields({ cfg, set, assets }) {
     : cfg.asset_scope === 'list' ? assets.filter(a => (cfg.asset_ids || []).includes(a.id)) : [];
   return html`<div class="card flat stack">
     <div class="row wrap" style="align-items:flex-end">
-      <label class="field">What is counted<select value=${cfg.unit} onChange=${(e) => set({ unit: e.target.value })}>${Object.entries(UNIT_LABEL).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></label>
+      <label class="field">What is counted<${Select} value=${cfg.unit} onChange=${(e) => set({ unit: e.target.value })}>${Object.entries(UNIT_LABEL).map(([k, l]) => html`<option value=${k}>${l}</option>`)}<//></label>
       <label class="field" style="flex:1">Display label<input type="text" value=${cfg.unit_label || ''} onInput=${(e) => set({ unit_label: e.target.value })} placeholder="calls made, tickets answered…" /></label>
     </div>
     <fieldset><legend>Applies to</legend>
@@ -308,7 +308,7 @@ function SocialFields({ cfg, set, assets }) {
     ${slots.map((s, i) => html`<div class="card flat stack">
       <div class="row wrap" style="align-items:flex-end">
         <label class="field">Slot<input type="text" value=${s.label} onInput=${(e) => upd(i, { label: e.target.value })} style="width:140px" /></label>
-        <label class="field">Time<input type="time" value=${s.time} onInput=${(e) => upd(i, { time: e.target.value })} style="width:120px" /></label>
+        <label class="field">Time<${TimeField} value=${s.time} onInput=${(e) => upd(i, { time: e.target.value })} style="width:120px" /></label>
         <label class="field">Videos<input type="number" min="0" max="20" value=${s.videos} onInput=${(e) => upd(i, { videos: +e.target.value })} /></label>
         <span class="spacer"></span>
         <button type="button" class="btn sm danger" onClick=${() => set({ slots: slots.filter((_, j) => j !== i) })}>Remove</button>
@@ -353,7 +353,7 @@ function Categories({ data }) {
         <button class="btn sm" onClick=${() => act('PUT', `/api/categories/${c.id}/archive`, { archived: false })}>Unarchive</button></div>`)}</div></details>`}
     <form class="card row wrap" style="align-items:flex-end" onSubmit=${async (e) => { e.preventDefault(); await act('POST', '/api/categories', { name, color, coding: true }); setName(''); toast({ msg: 'Category added' }); }}>
       <label class="field" style="flex:1;min-width:200px">New category<input type="text" required value=${name} onInput=${(e) => setName(e.target.value)} placeholder="e.g. Mobile apps" /></label>
-      <label class="field">Color<select value=${color} onChange=${(e) => setColor(e.target.value)}>${COLORS.map(c => html`<option value=${c}>${c}</option>`)}</select></label>
+      <label class="field">Color<${Select} value=${color} onChange=${(e) => setColor(e.target.value)}>${COLORS.map(c => html`<option value=${c}>${c}</option>`)}<//></label>
       <button class="btn primary">Add</button>
     </form>
   </div>`;
@@ -364,7 +364,7 @@ function CatRow({ c }) {
   return html`<div class="list-row">
     <${Chip} color=${c.color}>●</${Chip}>
     <input type="text" value=${name} onInput=${(e) => setName(e.target.value)} onBlur=${() => name !== c.name && save({ name })} aria-label="Category name" style="max-width:280px" />
-    <select value=${c.color} onChange=${(e) => save({ color: e.target.value })} aria-label="Color" style="width:auto">${COLORS.map(x => html`<option value=${x}>${x}</option>`)}</select>
+    <${Select} value=${c.color} onChange=${(e) => save({ color: e.target.value })} aria-label="Color" style="width:auto">${COLORS.map(x => html`<option value=${x}>${x}</option>`)}<//>
     <label class="checkline"><input type="checkbox" checked=${!!c.coding} onChange=${(e) => save({ coding: e.target.checked })} />Focus</label>
     ${c.key !== 'other' && html`<span class="spacer"></span><button class="btn sm" onClick=${() => act('PUT', `/api/categories/${c.id}/archive`, { archived: true })} title="Hide from pickers; tasks and projects keep it">Archive</button>`}
   </div>`;
@@ -384,8 +384,7 @@ function General({ data }) {
   </section>
   <form class="card stack" onSubmit=${async (e) => { e.preventDefault(); await act('PUT', '/api/settings', { timezone: tz }); toast({ msg: 'Timezone saved' }); }}>
     <h3>Timezone</h3>
-    <label class="field">Days start at midnight in this timezone<input type="text" list="tz-list" value=${tz} onInput=${(e) => setTz(e.target.value)} />
-      <datalist id="tz-list">${zones.map(z => html`<option value=${z} />`)}</datalist></label>
+    <label class="field">Days start at midnight in this timezone<${SuggestField} label="Timezone" choices=${zones} value=${tz} onInput=${setTz} /></label>
     <p class="hint">New accounts start in the time zone of the device they were created on. Today in the app: ${fmtDay(data.today)}.</p>
     <div class="form-actions"><button class="btn primary">Save</button></div>
   </form>

@@ -1,3 +1,4 @@
+import { DateField } from './controls.js';
 // Shared helpers and UI primitives.
 import { h, render } from 'preact';
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
@@ -276,7 +277,7 @@ export function EffectPicker({ value, onChange, today, allowToday = true, hint }
         <button type="button" aria-pressed=${mode === 'tomorrow'} class=${mode === 'tomorrow' ? 'on' : ''} onClick=${() => onChange(tomorrow)}>Tomorrow</button>
       </div>
       <span class="muted small">or pick a date</span>
-      <input type="date" class=${'effect-date' + (mode === 'date' ? ' on' : '')} aria-label="Other date" min=${allowToday ? today : tomorrow} value=${value} onInput=${(e) => e.target.value && onChange(e.target.value)} />
+      <${DateField} class=${'effect-date' + (mode === 'date' ? ' on' : '')} aria-label="Other date" min=${allowToday ? today : tomorrow} value=${value} onInput=${(e) => e.target.value && onChange(e.target.value)} />
     </div>
     <p class="hint">${hint || 'Past days keep their targets and scores.'} Effective: <strong>${fmtDay(value)}</strong>.</p>
   </fieldset>`;

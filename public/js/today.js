@@ -1,3 +1,4 @@
+import { Select, DateField } from './controls.js';
 // "Today": the routine checklist first, with a compact focus panel and a right column (score, next action, sessions).
 import { html, useState, useEffect, useRef, useResource, api, bus, toast, Icon, Bar, Ring, Chip, Empty, Modal, AutoGrow, TaskText, firstLine, fmtDay, fmtShort, addDays, fmtDur, pct, useFiveRows, SubtaskDraft, subtaskTitles, ConfirmDeleteTask } from './lib.js';
 import { PcTimeCard } from './pctime.js';
@@ -348,7 +349,7 @@ function TodoDetails({ t, ctx, onClose }) {
     <form class="stack" onSubmit=${save}>
       <p class="small"><strong>${firstLine(t.title)}</strong></p>
       <${CategoryInput} value=${cat} onInput=${setCat} cats=${ctx.cats} />
-      <label class="field">Repeat<select value=${repeat} onChange=${(e) => setRepeat(e.target.value)}>${REPEAT_LABELS.map(([v, l]) => html`<option value=${v}>${l}</option>`)}</select>
+      <label class="field">Repeat<${Select} value=${repeat} onChange=${(e) => setRepeat(e.target.value)}>${REPEAT_LABELS.map(([v, l]) => html`<option value=${v}>${l}</option>`)}<//>
         <span class="hint">A repeating task schedules its next one when you mark it done.</span></label>
       <div class="row"><span class="spacer"></span><button type="button" class="btn" onClick=${onClose}>Cancel</button><button class="btn primary">Save</button></div>
     </form>
@@ -756,7 +757,7 @@ function TaskMenu({ t, ctx }) {
         ? html`<button class="item" onClick=${async () => { try { await api('POST', `/api/tasks/${t.id}/unreport`); bus.emit(); setOpen(false); toast({ msg: 'Move undone' }); } catch (e) { toast({ msg: e.message, kind: 'error' }); } }}><${Icon} name="undo" size=${16} />Undo move</button>`
         : mode === 'report'
           ? html`<form class="inner stack" onSubmit=${report}>
-              <label class="field">Move to<input type="date" min=${addDays(t.date, 1)} value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
+              <label class="field">Move to<${DateField} aria-label="Move to" min=${addDays(t.date, 1)} value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
               <p class="hint">Only what remains is moved. What is already checked stays counted here, once.</p>
               <button class="btn primary sm">Move</button>
             </form>`
